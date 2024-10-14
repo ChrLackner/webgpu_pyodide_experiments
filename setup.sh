@@ -5,3 +5,4 @@ cd pyodide
 ln -s ../index.html
 ln -s ./pyodide.js
 ln -s ../code.py
+ln -s ../shader.wgsl
