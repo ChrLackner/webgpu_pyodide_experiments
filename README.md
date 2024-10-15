@@ -3,6 +3,7 @@
 This repository contains an example setup for using NGSolve with Pyodide and WebGPU. Follow the instructions below to set up and run the project, either as a standalone HTML server or within a Jupyter Notebook.
 
 You can test the hosted example here (takes a few seconds to init Pyodide): https://mhochsteger.github.io/webgpu_pyodide_experiments/
+
 Note that you need a browser with webgpu support.
 
 ## Setup
