@@ -1,8 +1,10 @@
+import asyncio
 import js
 from js import document, Float32Array, Int32Array
 import pyodide.ffi
 import sys
 
+frame_counter = 0
 
 def to_js(value):
     return pyodide.ffi.to_js(value, dict_converter=js.Object.fromEntries)
@@ -12,6 +14,18 @@ def abort():
     js.alert("WebGPU is not supported")
     sys.exit(1)
 
+async def non_blocking_sleep(milliseconds):
+    future = asyncio.Future()
+
+    # Define a callback to resolve the future
+    def resolve_future():
+        future.set_result(None)
+
+    # Use setTimeout to call the resolve function after the delay
+    js.setTimeout(pyodide.ffi.create_proxy(resolve_future), milliseconds)
+
+    # Await the future, allowing other tasks to run while waiting
+    await future
 
 def generate_data():
     if 1:
@@ -222,7 +236,11 @@ async def main():
 
     uniforms = Float32Array.new(1)
 
-    def update(time):
+
+    async def update(time):
+        global frame_counter
+        # print("rendering image", frame_counter)
+        frame_counter += 1
         uniforms[0] = time * 0.001
         device.queue.writeBuffer(uniform_buffer, 0, uniforms)
 
@@ -259,6 +277,7 @@ async def main():
         render_pass_encoder.end()
 
         device.queue.submit([command_encoder.finish()])
+        await non_blocking_sleep(1000)
         js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
 
     js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
