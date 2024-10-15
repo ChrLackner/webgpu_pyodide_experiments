@@ -3,6 +3,8 @@ struct Normal { n : vec3<f32> };
 struct Trig { v : vec3<u32>, index: i32 };
 struct Edge { v : vec2<u32> };
 
+struct Uniforms {translation : vec2<f32>};
+@group(0) @binding(0) var<uniform> uniforms : Uniforms;
 
 @group(0) @binding(1) var<storage> vertices : array<vec3<f32>>;
 @group(0) @binding(2) var<storage> edges : array<Edge>;
@@ -15,7 +17,7 @@ struct VertexOutput
 };
 
 fn calcPosition(p: vec3<f32>) -> vec3<f32> {
-  var out = p - vec3<f32>(0.5, 0.5, 0.0);
+  var out = p - vec3<f32>(0.5, 0.5, 0.0) + vec3<f32>(uniforms.translation, 0.0);
   return 1.8*out;
 }
 
@@ -46,9 +48,6 @@ fn mainVertexEdge(@builtin(vertex_index) vertexId: u32) -> VertexOutput
   else { lam[1] = 1.0;}
   return VertexOutput(vec4(position,  1.0), lam);
 }
-
-struct Uniforms {iTime : f32};
-@group(0) @binding(0) var<uniform> uniforms : Uniforms;
 
 @fragment
 fn mainFragmentTrig(@builtin(position) p: vec4<f32>, @location(0) lam: vec3<f32>) -> @location(0) vec4<f32> 

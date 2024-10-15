@@ -6,6 +6,7 @@ import sys
 
 frame_counter = 0
 
+
 def to_js(value):
     return pyodide.ffi.to_js(value, dict_converter=js.Object.fromEntries)
 
@@ -13,6 +14,7 @@ def to_js(value):
 def abort():
     js.alert("WebGPU is not supported")
     sys.exit(1)
+
 
 async def non_blocking_sleep(milliseconds):
     future = asyncio.Future()
@@ -27,11 +29,12 @@ async def non_blocking_sleep(milliseconds):
     # Await the future, allowing other tasks to run while waiting
     await future
 
+
 def generate_data():
     if 1:
         from netgen.occ import unit_square
 
-        m = unit_square.GenerateMesh(maxh=0.2)
+        m = unit_square.GenerateMesh(maxh=0.05)
 
         vertices = []
         for p in m.Points():
@@ -59,7 +62,30 @@ def generate_data():
     return vertex_array, edges_array, trigs_array
 
 
-async def main():
+_render_function = None
+
+_position = [0, 0]
+_is_moving = False
+
+
+def on_mousedown(ev):
+    global _is_moving
+    _is_moving = True
+
+
+def on_mouseup(ev):
+    global _is_moving
+    _is_moving = False
+
+
+def on_mousemove(ev):
+    if _is_moving:
+        _position[0] += ev.movementX
+        _position[1] -= ev.movementY
+        js.requestAnimationFrame(_render_function)
+
+
+async def main(canvas=None, shader_url="./shader.wgsl"):
 
     if not js.navigator.gpu:
         abort()
@@ -71,8 +97,9 @@ async def main():
     device = await adapter.requestDevice()
     format = js.navigator.gpu.getPreferredCanvasFormat()
 
-    # Get the canvas context and configure it
-    canvas = document.getElementById("canvas")
+    if canvas is None:
+        canvas = document.getElementById("canvas")
+
     context = canvas.getContext("webgpu")
     context.configure(
         to_js(
@@ -84,11 +111,15 @@ async def main():
         )
     )
 
+    canvas.addEventListener("mousedown", pyodide.ffi.create_proxy(on_mousedown))
+    canvas.addEventListener("mouseup", pyodide.ffi.create_proxy(on_mouseup))
+    canvas.addEventListener("mousemove", pyodide.ffi.create_proxy(on_mousemove))
+
     # Create the uniform buffer
     uniform_buffer = device.createBuffer(
         to_js(
             {
-                "size": 4,
+                "size": 2 * 4,
                 "usage": js.GPUBufferUsage.UNIFORM | js.GPUBufferUsage.COPY_DST,
             }
         )
@@ -100,7 +131,7 @@ async def main():
                 "entries": [
                     {
                         "binding": 0,
-                        "visibility": js.GPUShaderStage.FRAGMENT,
+                        "visibility": js.GPUShaderStage.VERTEX,
                         "buffer": {"type": "uniform"},
                     },
                     {
@@ -176,7 +207,7 @@ async def main():
     )
 
     # Create the render pipeline
-    shader_code = await (await js.fetch("./shader.wgsl")).text()
+    shader_code = await (await js.fetch(shader_url)).text()
     render_pipeline_edges = device.createRenderPipeline(
         to_js(
             {
@@ -223,7 +254,6 @@ async def main():
         )
     )
 
-    print("canvas size", canvas.width, canvas.height)
     depthTexture = device.createTexture(
         to_js(
             {
@@ -234,14 +264,14 @@ async def main():
         )
     )
 
-    uniforms = Float32Array.new(1)
-
+    uniforms = Float32Array.new(2)
 
     async def update(time):
         global frame_counter
         # print("rendering image", frame_counter)
         frame_counter += 1
-        uniforms[0] = time * 0.001
+        uniforms[0] = _position[0] / canvas.width
+        uniforms[1] = _position[1] / canvas.height
         device.queue.writeBuffer(uniform_buffer, 0, uniforms)
 
         command_encoder = device.createCommandEncoder()
@@ -258,7 +288,9 @@ async def main():
                         }
                     ],
                     "depthStencilAttachment": {
-                        "view": depthTexture.createView(to_js({"format": "depth24plus", "aspect": "all"})),
+                        "view": depthTexture.createView(
+                            to_js({"format": "depth24plus", "aspect": "all"})
+                        ),
                         "depthLoadOp": "clear",
                         "depthStoreOp": "store",
                         "depthClearValue": 1.0,
@@ -277,11 +309,13 @@ async def main():
         render_pass_encoder.end()
 
         device.queue.submit([command_encoder.finish()])
-        await non_blocking_sleep(1000)
-        js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
+        # await non_blocking_sleep(1000/60)
+        # js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
 
-    js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
+    global _render_function
+    _render_function = pyodide.ffi.create_proxy(update)
+
+    js.requestAnimationFrame(_render_function)
 
 
-# Run the main function
-await main()
+main
