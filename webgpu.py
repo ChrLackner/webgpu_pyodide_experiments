@@ -1,10 +1,34 @@
-import asyncio
 import js
-from js import document, Float32Array, Int32Array
 import pyodide.ffi
+from pyodide.ffi import create_proxy
 import sys
+import ctypes as ct
+import math
 
-frame_counter = 0
+
+class ClippingPlane(ct.Structure):
+    _fields_ = [("normal", ct.c_float * 3), ("dist", ct.c_float)]
+
+
+class Complex(ct.Structure):
+    _fields_ = [("re", ct.c_float), ("im", ct.c_float)]
+
+
+class Colormap(ct.Structure):
+    _fields_ = [("min", ct.c_float), ("max", ct.c_float)]
+
+
+class Uniforms(ct.Structure):
+    _fields_ = [
+        ("mat", ct.c_float * 16),
+        ("clipping_plane", ClippingPlane),
+        ("colormap", Colormap),
+        ("scaling", Complex),
+        ("aspect", ct.c_float),
+        ("eval_mode", ct.c_uint32),
+        ("do_clipping", ct.c_uint32),
+        ("padding", ct.c_uint32),
+    ]
 
 
 def to_js(value):
@@ -16,48 +40,29 @@ def abort():
     sys.exit(1)
 
 
-async def non_blocking_sleep(milliseconds):
-    future = asyncio.Future()
-
-    # Define a callback to resolve the future
-    def resolve_future():
-        future.set_result(None)
-
-    # Use setTimeout to call the resolve function after the delay
-    js.setTimeout(pyodide.ffi.create_proxy(resolve_future), milliseconds)
-
-    # Await the future, allowing other tasks to run while waiting
-    await future
-
-
 def generate_data():
-    if 1:
-        from netgen.occ import unit_square
+    from netgen.occ import unit_square
 
-        m = unit_square.GenerateMesh(maxh=0.05)
+    m = unit_square.GenerateMesh(maxh=0.05)
 
-        vertices = []
-        for p in m.Points():
-            for i in range(3):
-                vertices.append(p[i])
-            vertices.append(0)
+    vertices = []
+    for p in m.Points():
+        for i in range(3):
+            vertices.append(p[i])
+        vertices.append(0)
 
-        trigs = []
-        edges = []
-        for t in m.Elements2D():
-            for i in range(3):
-                trigs.append(t.vertices[i].nr - 1)
-                edges.append(t.vertices[i].nr - 1)
-                edges.append(t.vertices[(i + 1) % 3].nr - 1)
-            trigs.append(0)
-    else:
-        vertices = [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0]
-        trigs = [0, 1, 2, 0]
-        edges = [0, 1, 1, 2, 2, 0]
+    trigs = []
+    edges = []
+    for t in m.Elements2D():
+        for i in range(3):
+            trigs.append(t.vertices[i].nr - 1)
+            edges.append(t.vertices[i].nr - 1)
+            edges.append(t.vertices[(i + 1) % 3].nr - 1)
+        trigs.append(0)
 
-    vertex_array = Float32Array.new(vertices)
-    trigs_array = Int32Array.new(trigs)
-    edges_array = Int32Array.new(edges)
+    vertex_array = js.Float32Array.new(vertices)
+    trigs_array = js.Int32Array.new(trigs)
+    edges_array = js.Int32Array.new(edges)
 
     return vertex_array, edges_array, trigs_array
 
@@ -85,20 +90,12 @@ def on_mousemove(ev):
         js.requestAnimationFrame(_render_function)
 
 
-async def main(canvas=None, shader_url="./shader.wgsl"):
-
+async def init_canvas(canvas):
     if not js.navigator.gpu:
         abort()
 
-    adapter = await js.navigator.gpu.requestAdapter()
-    if not adapter:
-        abort()
-
-    device = await adapter.requestDevice()
-    format = js.navigator.gpu.getPreferredCanvasFormat()
-
     if canvas is None:
-        canvas = document.getElementById("canvas")
+        canvas = js.document.getElementById("canvas")
 
     # cloning and replacing the canvas removes all old event listeners
     new_canvas = canvas.cloneNode(True)
@@ -106,62 +103,63 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     canvas = new_canvas
     del new_canvas
 
-    context = canvas.getContext("webgpu")
-    context.configure(
+    canvas.addEventListener("mousedown", create_proxy(on_mousedown))
+    canvas.addEventListener("mouseup", create_proxy(on_mouseup))
+    canvas.addEventListener("mousemove", create_proxy(on_mousemove))
+
+    return canvas
+
+
+def create_colormap(device):
+    n = 256
+    data = js.Uint8Array.new(n * 4)
+
+    for i in range(n):
+        data[4 * i] = i
+        data[4 * i + 1] = n - i - 1
+        data[4 * i + 2] = 0
+        data[4 * i + 3] = 255
+
+    texture = device.createTexture(
         to_js(
             {
-                "device": device,
-                "format": format,
-                "alphaMode": "premultiplied",
+                "dimension": "1d",
+                "size": [n, 1, 1],
+                "format": "rgba8unorm",
+                "usage": js.GPUTextureUsage.TEXTURE_BINDING
+                | js.GPUTextureUsage.COPY_DST,
             }
         )
     )
 
-    canvas.addEventListener("mousedown", pyodide.ffi.create_proxy(on_mousedown))
-    canvas.addEventListener("mouseup", pyodide.ffi.create_proxy(on_mouseup))
-    canvas.addEventListener("mousemove", pyodide.ffi.create_proxy(on_mousemove))
+    device.queue.writeTexture(
+        to_js({"texture": texture}), data, to_js({"bytesPerRow": n * 4}), [n, 1, 1]
+    )
 
-    # Create the uniform buffer
+    sampler = device.createSampler(
+        to_js(
+            {
+                "magFilter": "linear",
+                "minFilter": "linear",
+                "addressModeU": "repeat",
+                "addressModeV": "clamp-to-edge",
+            }
+        )
+    )
+    return texture, sampler
+
+
+def create_buffers(device):
     uniform_buffer = device.createBuffer(
         to_js(
             {
-                "size": 2 * 4,
+                "size": len(bytes(Uniforms())),
                 "usage": js.GPUBufferUsage.UNIFORM | js.GPUBufferUsage.COPY_DST,
             }
         )
     )
 
-    bindGroupLayout = device.createBindGroupLayout(
-        to_js(
-            {
-                "entries": [
-                    {
-                        "binding": 0,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "uniform"},
-                    },
-                    {
-                        "binding": 1,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                    {
-                        "binding": 2,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                    {
-                        "binding": 3,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                ],
-            }
-        )
-    )
-
     vertices, edges, trigs = generate_data()
-
     vertex_buffer = device.createBuffer(
         to_js(
             {
@@ -193,16 +191,98 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     device.queue.writeBuffer(edges_buffer, 0, edges)
     device.queue.writeBuffer(trig_buffer, 0, trigs)
 
-    # Create the bind group for the uniforms
-    uniform_bind_group = device.createBindGroup(
+    return uniform_buffer, vertex_buffer, edges_buffer, trig_buffer
+
+
+async def main(canvas=None, shader_url="./shader.wgsl"):
+
+    canvas = await init_canvas(canvas)
+
+    adapter = await js.navigator.gpu.requestAdapter()
+    if not adapter:
+        abort()
+
+    device = await adapter.requestDevice()
+    format = js.navigator.gpu.getPreferredCanvasFormat()
+
+    context = canvas.getContext("webgpu")
+    context.configure(
+        to_js(
+            {
+                "device": device,
+                "format": format,
+                "alphaMode": "premultiplied",
+            }
+        )
+    )
+    colormap_texture, colormap_sampler = create_colormap(device)
+
+    bindGroupLayout = device.createBindGroupLayout(
+        to_js(
+            {
+                "entries": [
+                    {
+                        "binding": 0,
+                        "visibility": js.GPUShaderStage.VERTEX
+                        | js.GPUShaderStage.FRAGMENT,
+                        "buffer": {"type": "uniform"},
+                    },
+                    {
+                        "binding": 1,
+                        "visibility": js.GPUShaderStage.FRAGMENT,
+                        "texture": {
+                            "sampleType": "float",
+                            "viewDimension": "1d",
+                            "multisamples": False,
+                        },
+                    },
+                    {
+                        "binding": 2,
+                        "visibility": js.GPUShaderStage.FRAGMENT,
+                        "sampler": {"type": "filtering"},
+                    },
+                    {
+                        "binding": 3,
+                        "visibility": js.GPUShaderStage.VERTEX,
+                        "buffer": {"type": "read-only-storage"},
+                    },
+                    {
+                        "binding": 4,
+                        "visibility": js.GPUShaderStage.VERTEX,
+                        "buffer": {"type": "read-only-storage"},
+                    },
+                ],
+            }
+        )
+    )
+
+    uniform_buffer, vertex_buffer, edge_buffer, trig_buffer = create_buffers(device)
+
+    edge_bind_group = device.createBindGroup(
         to_js(
             {
                 "layout": bindGroupLayout,
                 "entries": [
                     {"binding": 0, "resource": {"buffer": uniform_buffer}},
-                    {"binding": 1, "resource": {"buffer": vertex_buffer}},
-                    {"binding": 2, "resource": {"buffer": edges_buffer}},
-                    {"binding": 3, "resource": {"buffer": trig_buffer}},
+                    {"binding": 1, "resource": colormap_texture.createView()},
+                    {"binding": 2, "resource": colormap_sampler},
+                    {"binding": 3, "resource": {"buffer": vertex_buffer}},
+                    {"binding": 4, "resource": {"buffer": edge_buffer}},
+                ],
+            }
+        )
+    )
+
+    trig_bind_group = device.createBindGroup(
+        to_js(
+            {
+                "layout": bindGroupLayout,
+                "entries": [
+                    {"binding": 0, "resource": {"buffer": uniform_buffer}},
+                    {"binding": 1, "resource": colormap_texture.createView()},
+                    {"binding": 2, "resource": colormap_sampler},
+                    {"binding": 3, "resource": {"buffer": vertex_buffer}},
+                    {"binding": 4, "resource": {"buffer": trig_buffer}},
                 ],
             }
         )
@@ -212,7 +292,6 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
         to_js({"bindGroupLayouts": [bindGroupLayout]})
     )
 
-    # Create the render pipeline
     shader_code = await (await js.fetch(shader_url)).text()
     shader_module = device.createShaderModule(to_js({"code": shader_code}))
     render_pipeline_edges = device.createRenderPipeline(
@@ -271,15 +350,41 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
         )
     )
 
-    uniforms = Float32Array.new(2)
+    uniforms = Uniforms()
+    uniforms.do_clipping = 1
+    uniforms.clipping_plane.normal[0] = 1
+    uniforms.clipping_plane.normal[1] = 0
+    uniforms.clipping_plane.normal[2] = 0
+    uniforms.clipping_plane.dist = 1
+    uniforms.colormap.min = 0.0
+    uniforms.colormap.max = 0.0
+    uniforms.scaling.im = 0.0
+    uniforms.scaling.re = 0.0
+    uniforms.aspect = 0.0
+    uniforms.eval_mode = 0
+
+    for i in range(16):
+        uniforms.mat[i] = 0.0
+
+    for i in [0, 5, 10]:
+        uniforms.mat[i] = 1.8
+
+    uniforms.mat[15] = 1.0
+
+    # translate to center
+    uniforms.mat[12] = -0.5 * 1.8
+    uniforms.mat[13] = -0.5 * 1.8
 
     async def update(time):
-        global frame_counter
-        # print("rendering image", frame_counter)
-        frame_counter += 1
-        uniforms[0] = _position[0] / canvas.width
-        uniforms[1] = _position[1] / canvas.height
-        device.queue.writeBuffer(uniform_buffer, 0, uniforms)
+        uniforms.mat[12] += _position[0] / canvas.width
+        uniforms.mat[13] += _position[1] / canvas.height
+        _position[0] = 0
+        _position[1] = 0
+        # print("render", time)
+        # uniforms.clipping_plane.dist = math.sin(time/300)* 0.5 - 0.5
+        data = bytes(uniforms)
+        buffer = js.Uint8Array.new(data)
+        device.queue.writeBuffer(uniform_buffer, 0, buffer)
 
         command_encoder = device.createCommandEncoder()
 
@@ -305,22 +410,22 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
                 },
             )
         )
-        render_pass_encoder.setViewport(0, 0, canvas.width, canvas.height, 0.0, 0.9999)
+        render_pass_encoder.setViewport(0, 0, canvas.width, canvas.height, 0.0, 1.0)
 
         render_pass_encoder.setPipeline(render_pipeline_edges)
-        render_pass_encoder.setBindGroup(0, uniform_bind_group)
-        render_pass_encoder.draw(edges.length, 1, 0, 0)
+        render_pass_encoder.setBindGroup(0, edge_bind_group)
+        render_pass_encoder.draw(len(edge_buffer) / 4, 1, 0, 0)
+
         render_pass_encoder.setPipeline(render_pipeline_trigs)
-        render_pass_encoder.setBindGroup(0, uniform_bind_group)
-        render_pass_encoder.draw(trigs.length, 1, 0, 0)
+        render_pass_encoder.setBindGroup(0, trig_bind_group)
+        render_pass_encoder.draw(len(trig_buffer) / 4, 1, 0, 0)
+
         render_pass_encoder.end()
 
         device.queue.submit([command_encoder.finish()])
-        # await non_blocking_sleep(1000/60)
-        # js.requestAnimationFrame(pyodide.ffi.create_proxy(update))
 
     global _render_function
-    _render_function = pyodide.ffi.create_proxy(update)
+    _render_function = create_proxy(update)
 
     js.requestAnimationFrame(_render_function)
 
