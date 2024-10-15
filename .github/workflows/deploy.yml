@@ -27,7 +27,7 @@ jobs:
     - name: Serve static content
       run: |
         mkdir -p public
-        mv * public/
+        mv *.html pyodide *.wgsl *.py public/
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v1
