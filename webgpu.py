@@ -208,16 +208,17 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
 
     # Create the render pipeline
     shader_code = await (await js.fetch(shader_url)).text()
+    shader_module = device.createShaderModule(to_js({"code": shader_code}))
     render_pipeline_edges = device.createRenderPipeline(
         to_js(
             {
                 "layout": pipelineLayout,
                 "vertex": {
-                    "module": device.createShaderModule(to_js({"code": shader_code})),
+                    "module": shader_module,
                     "entryPoint": "mainVertexEdge",
                 },
                 "fragment": {
-                    "module": device.createShaderModule(to_js({"code": shader_code})),
+                    "module": shader_module,
                     "entryPoint": "mainFragmentEdge",
                     "targets": [{"format": format}],
                 },
@@ -236,11 +237,11 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
             {
                 "layout": pipelineLayout,
                 "vertex": {
-                    "module": device.createShaderModule(to_js({"code": shader_code})),
+                    "module": shader_module,
                     "entryPoint": "mainVertexTrig",
                 },
                 "fragment": {
-                    "module": device.createShaderModule(to_js({"code": shader_code})),
+                    "module": shader_module,
                     "entryPoint": "mainFragmentTrig",
                     "targets": [{"format": format}],
                 },
