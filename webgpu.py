@@ -100,6 +100,12 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     if canvas is None:
         canvas = document.getElementById("canvas")
 
+    # cloning and replacing the canvas removes all old event listeners
+    new_canvas = canvas.cloneNode(True)
+    canvas.parentNode.replaceChild(new_canvas, canvas)
+    canvas = new_canvas
+    del new_canvas
+
     context = canvas.getContext("webgpu")
     context.configure(
         to_js(
