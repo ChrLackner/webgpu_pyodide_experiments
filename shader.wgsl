@@ -1,5 +1,3 @@
-
-struct Normal { n : vec3<f32> };
 struct Trig { v : vec3<u32>, index: i32 };
 struct Edge { v : vec2<u32> };
 
