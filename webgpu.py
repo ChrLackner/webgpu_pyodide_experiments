@@ -252,6 +252,11 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
                         "visibility": js.GPUShaderStage.VERTEX,
                         "buffer": {"type": "read-only-storage"},
                     },
+                    {
+                        "binding": 5,
+                        "visibility": js.GPUShaderStage.VERTEX,
+                        "buffer": {"type": "read-only-storage"},
+                    },
                 ],
             }
         )
@@ -259,7 +264,7 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
 
     uniform_buffer, vertex_buffer, edge_buffer, trig_buffer = create_buffers(device)
 
-    edge_bind_group = device.createBindGroup(
+    bind_group = device.createBindGroup(
         to_js(
             {
                 "layout": bindGroupLayout,
@@ -269,21 +274,7 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
                     {"binding": 2, "resource": colormap_sampler},
                     {"binding": 3, "resource": {"buffer": vertex_buffer}},
                     {"binding": 4, "resource": {"buffer": edge_buffer}},
-                ],
-            }
-        )
-    )
-
-    trig_bind_group = device.createBindGroup(
-        to_js(
-            {
-                "layout": bindGroupLayout,
-                "entries": [
-                    {"binding": 0, "resource": {"buffer": uniform_buffer}},
-                    {"binding": 1, "resource": colormap_texture.createView()},
-                    {"binding": 2, "resource": colormap_sampler},
-                    {"binding": 3, "resource": {"buffer": vertex_buffer}},
-                    {"binding": 4, "resource": {"buffer": trig_buffer}},
+                    {"binding": 5, "resource": {"buffer": trig_buffer}},
                 ],
             }
         )
@@ -414,11 +405,11 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
         render_pass_encoder.setViewport(0, 0, canvas.width, canvas.height, 0.0, 1.0)
 
         render_pass_encoder.setPipeline(render_pipeline_edges)
-        render_pass_encoder.setBindGroup(0, edge_bind_group)
+        render_pass_encoder.setBindGroup(0, bind_group)
         render_pass_encoder.draw(len(edge_buffer) / 4, 1, 0, 0)
 
         render_pass_encoder.setPipeline(render_pipeline_trigs)
-        render_pass_encoder.setBindGroup(0, trig_bind_group)
+        render_pass_encoder.setBindGroup(0, bind_group)
         render_pass_encoder.draw(len(trig_buffer) / 4, 1, 0, 0)
 
         render_pass_encoder.end()

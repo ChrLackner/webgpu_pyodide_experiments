@@ -36,7 +36,7 @@ struct Uniforms {
 
 @group(0) @binding(3) var<storage> vertices : array<vec3<f32>>;
 @group(0) @binding(4) var<storage> edges : array<Edge>;
-@group(0) @binding(4) var<storage> trigs : array<Trig>;
+@group(0) @binding(5) var<storage> trigs : array<Trig>;
 
 struct VertexOutput {
   @builtin(position) fragPosition: vec4<f32>,
