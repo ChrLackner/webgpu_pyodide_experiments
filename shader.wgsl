@@ -51,7 +51,6 @@ fn mainVertexTrig(@builtin(vertex_index) vertexId: u32, @builtin(instance_index)
     var vid: u32 = trig.v[vertexId];
     var p = vertices[vid];
     var position = calcPosition(p);
-    position.z = 0.01;
     var lam: vec3<f32> = vec3<f32>(0.);
     lam[vertexId] = 1.0;
     var value: f32 = p.x;

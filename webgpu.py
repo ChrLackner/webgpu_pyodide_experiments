@@ -87,7 +87,7 @@ class WebGPU:
         self.depth_stencil = {
             "format": self.depth_format,
             "depthWriteEnabled": True,
-            "depthCompare": "less-equal",
+            "depthCompare": "less",
         }
 
         self.depth_texture = device.createTexture(
@@ -302,7 +302,9 @@ class MeshRenderObject:
                         "targets": [{"format": self.gpu.format}],
                     },
                     "primitive": {"topology": "line-list"},
-                    "depthStencil": self.gpu.depth_stencil,
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                    },
                 }
             )
         )
@@ -321,7 +323,12 @@ class MeshRenderObject:
                         "targets": [{"format": self.gpu.format}],
                     },
                     "primitive": {"topology": "triangle-list"},
-                    "depthStencil": self.gpu.depth_stencil,
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                        # shift trigs behind to ensure that edges are rendered properly
+                        "depthBias": 1.0,
+                        "depthBiasSlopeScale": 1,
+                    },
                 }
             )
         )
