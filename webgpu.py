@@ -50,8 +50,8 @@ class InputHandler:
 
     def on_mousemove(self, ev):
         if self._is_moving:
-            self.gpu.uniforms.mat[12] += ev.movementX / self.gpu.canvas.width
-            self.gpu.uniforms.mat[13] -= ev.movementY / self.gpu.canvas.height
+            self.gpu.uniforms.mat[12] += ev.movementX / self.gpu.canvas.width * 1.8
+            self.gpu.uniforms.mat[13] -= ev.movementY / self.gpu.canvas.height * 1.8
             js.requestAnimationFrame(self.gpu.render_function)
 
 
@@ -348,33 +348,6 @@ def to_js(value):
 def abort():
     js.alert("WebGPU is not supported")
     sys.exit(1)
-
-
-def generate_data():
-    from netgen.occ import unit_square
-
-    m = unit_square.GenerateMesh(maxh=0.05)
-
-    vertices = []
-    for p in m.Points():
-        for i in range(3):
-            vertices.append(p[i])
-        vertices.append(0)
-
-    trigs = []
-    edges = []
-    for t in m.Elements2D():
-        for i in range(3):
-            trigs.append(t.vertices[i].nr - 1)
-            edges.append(t.vertices[i].nr - 1)
-            edges.append(t.vertices[(i + 1) % 3].nr - 1)
-        trigs.append(t.index)
-
-    vertex_array = js.Float32Array.new(vertices)
-    trigs_array = js.Int32Array.new(trigs)
-    edges_array = js.Int32Array.new(edges)
-
-    return vertex_array, edges_array, trigs_array
 
 
 def init_canvas(canvas):
