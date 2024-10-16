@@ -31,10 +31,35 @@ class Uniforms(ct.Structure):
     ]
 
 
+class InputHandler:
+    def __init__(self, gpu):
+        self.gpu = gpu
+        self._is_moving = False
+
+        canvas = self.gpu.canvas
+        canvas.addEventListener("mousedown", create_proxy(self.on_mousedown))
+        canvas.addEventListener("mouseup", create_proxy(self.on_mouseup))
+        canvas.addEventListener("mousemove", create_proxy(self.on_mousemove))
+
+    def on_mousedown(self, _):
+        self._is_moving = True
+
+    def on_mouseup(self, _):
+        global _is_moving
+        self._is_moving = False
+
+    def on_mousemove(self, ev):
+        if self._is_moving:
+            self.gpu.uniforms.mat[12] += ev.movementX / self.gpu.canvas.width
+            self.gpu.uniforms.mat[13] -= ev.movementY / self.gpu.canvas.height
+            js.requestAnimationFrame(self.gpu.render_function)
+
+
 class WebGPU:
     """WebGPU management class, handles "global" state, like device, canvas, colormap and uniforms"""
 
     def __init__(self, device, canvas):
+        self.render_function = None
         self.device = device
         self.format = js.navigator.gpu.getPreferredCanvasFormat()
         self.canvas = canvas
@@ -352,29 +377,6 @@ def generate_data():
     return vertex_array, edges_array, trigs_array
 
 
-_render_function = None
-
-_position = [0, 0]
-_is_moving = False
-
-
-def on_mousedown(_):
-    global _is_moving
-    _is_moving = True
-
-
-def on_mouseup(_):
-    global _is_moving
-    _is_moving = False
-
-
-def on_mousemove(ev):
-    if _is_moving:
-        _position[0] += ev.movementX
-        _position[1] -= ev.movementY
-        js.requestAnimationFrame(_render_function)
-
-
 def init_canvas(canvas):
     if not js.navigator.gpu:
         abort()
@@ -387,10 +389,6 @@ def init_canvas(canvas):
     canvas.parentNode.replaceChild(new_canvas, canvas)
     canvas = new_canvas
     del new_canvas
-
-    canvas.addEventListener("mousedown", create_proxy(on_mousedown))
-    canvas.addEventListener("mouseup", create_proxy(on_mouseup))
-    canvas.addEventListener("mousemove", create_proxy(on_mousemove))
 
     return canvas
 
@@ -444,6 +442,7 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     device = await adapter.requestDevice()
 
     gpu = WebGPU(device, canvas)
+    input_handler = InputHandler(gpu)
 
     from netgen.occ import unit_square
 
@@ -451,11 +450,7 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     shader_code = await (await js.fetch(shader_url)).text()
     mesh_object = MeshRenderObject(mesh, gpu, shader_code)
 
-    async def update(time):
-        gpu.uniforms.mat[12] += _position[0] / canvas.width
-        gpu.uniforms.mat[13] += _position[1] / canvas.height
-        _position[0] = 0
-        _position[1] = 0
+    def render(time):
         gpu.update_uniform_buffer()
 
         command_encoder = device.createCommandEncoder()
@@ -466,10 +461,9 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
 
         device.queue.submit([command_encoder.finish()])
 
-    global _render_function
-    _render_function = create_proxy(update)
+    gpu.render_function = create_proxy(render)
 
-    js.requestAnimationFrame(_render_function)
+    js.requestAnimationFrame(gpu.render_function)
 
 
 main
