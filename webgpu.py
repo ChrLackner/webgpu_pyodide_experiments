@@ -7,6 +7,292 @@ import pyodide.ffi
 from pyodide.ffi import create_proxy
 
 
+class WebGPU:
+    """WebGPU management class, handles "global" state, like device, canvas, colormap and uniforms"""
+
+    def __init__(self, device, canvas, format):
+        self.device = device
+        self.format = format
+        self.canvas = canvas
+
+        self.context = canvas.getContext("webgpu")
+        self.context.configure(
+            to_js(
+                {
+                    "device": device,
+                    "format": format,
+                    "alphaMode": "premultiplied",
+                }
+            )
+        )
+        self.uniform_buffer = device.createBuffer(
+            to_js(
+                {
+                    "size": len(bytes(Uniforms())),
+                    "usage": js.GPUBufferUsage.UNIFORM | js.GPUBufferUsage.COPY_DST,
+                }
+            )
+        )
+
+        self.colormap_texture, self.colormap_sampler = create_colormap(device)
+        self.depth_format = "depth24plus"
+        self.depth_stencil = {
+            "format": self.depth_format,
+            "depthWriteEnabled": True,
+            "depthCompare": "less-equal",
+        }
+
+        self.depth_texture = device.createTexture(
+            to_js(
+                {
+                    "size": [canvas.width, canvas.height, 1],
+                    "format": self.depth_format,
+                    "usage": js.GPUTextureUsage.RENDER_ATTACHMENT,
+                }
+            )
+        )
+        uniforms = Uniforms()
+        uniforms.do_clipping = 1
+        uniforms.clipping_plane.normal[0] = 1
+        uniforms.clipping_plane.normal[1] = 0
+        uniforms.clipping_plane.normal[2] = 0
+        uniforms.clipping_plane.dist = 1
+        uniforms.colormap.min = 0.0
+        uniforms.colormap.max = 0.0
+        uniforms.scaling.im = 0.0
+        uniforms.scaling.re = 0.0
+        uniforms.aspect = 0.0
+        uniforms.eval_mode = 0
+
+        for i in range(16):
+            uniforms.mat[i] = 0.0
+
+        for i in [0, 5, 10]:
+            uniforms.mat[i] = 1.8
+
+        uniforms.mat[15] = 1.0
+
+        # translate to center
+        uniforms.mat[12] = -0.5 * 1.8
+        uniforms.mat[13] = -0.5 * 1.8
+        self.uniforms = uniforms
+
+    def update_uniform_buffer(self):
+        buffer = js.Uint8Array.new(bytes(self.uniforms))
+        self.device.queue.writeBuffer(self.uniform_buffer, 0, buffer)
+
+    def begin_render_pass(self, command_encoder):
+        render_pass_encoder = command_encoder.beginRenderPass(
+            to_js(
+                {
+                    "colorAttachments": [
+                        {
+                            "view": self.context.getCurrentTexture().createView(),
+                            "clearValue": {"r": 1, "g": 1, "b": 1, "a": 1},
+                            "loadOp": "clear",
+                            "storeOp": "store",
+                        }
+                    ],
+                    "depthStencilAttachment": {
+                        "view": self.depth_texture.createView(
+                            to_js({"format": self.depth_format, "aspect": "all"})
+                        ),
+                        "depthLoadOp": "clear",
+                        "depthStoreOp": "store",
+                        "depthClearValue": 1.0,
+                    },
+                },
+            )
+        )
+        render_pass_encoder.setViewport(
+            0, 0, self.canvas.width, self.canvas.height, 0.0, 1.0
+        )
+        return render_pass_encoder
+
+
+class MeshRenderObject:
+    """Class that creates and manages all webgpu data structures to render a Netgen mesh"""
+
+    def __init__(self, mesh, gpu, shader_code):
+        self.mesh = mesh
+        self.gpu = gpu
+
+        self._create_buffers()
+        self._create_bind_group_layout()
+        self._create_bind_group()
+
+        self._create_pipeline_layout()
+        self._create_pipelines(shader_code)
+
+    def _create_buffers(self):
+        m = self.mesh
+
+        self.n_vertices = len(m.Points())
+        self.n_trigs = len(m.Elements2D())
+        self.n_edges = 3 * self.n_trigs
+
+        vertices = []
+        for p in m.Points():
+            for i in range(3):
+                vertices.append(p[i])
+            vertices.append(0)
+
+        trigs = []
+        edges = []
+        for t in m.Elements2D():
+            for i in range(3):
+                trigs.append(t.vertices[i].nr - 1)
+                edges.append(t.vertices[i].nr - 1)
+                edges.append(t.vertices[(i + 1) % 3].nr - 1)
+            trigs.append(t.index)
+
+        data = {
+            "vertices": js.Float32Array.new(vertices),
+            "edges": js.Int32Array.new(edges),
+            "trigs": js.Int32Array.new(trigs),
+        }
+
+        buffers = {}
+        for name, values in data.items():
+            buffers[name] = self.gpu.device.createBuffer(
+                to_js(
+                    {
+                        "size": values.length * 4,
+                        "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
+                    }
+                )
+            )
+            self.gpu.device.queue.writeBuffer(buffers[name], 0, values)
+        self._buffers = buffers
+
+    def _create_bind_group_layout(self):
+        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
+            to_js(
+                {
+                    "entries": [
+                        {
+                            "binding": 0,
+                            "visibility": js.GPUShaderStage.VERTEX
+                            | js.GPUShaderStage.FRAGMENT,
+                            "buffer": {"type": "uniform"},
+                        },
+                        {
+                            "binding": 1,
+                            "visibility": js.GPUShaderStage.FRAGMENT,
+                            "texture": {
+                                "sampleType": "float",
+                                "viewDimension": "1d",
+                                "multisamples": False,
+                            },
+                        },
+                        {
+                            "binding": 2,
+                            "visibility": js.GPUShaderStage.FRAGMENT,
+                            "sampler": {"type": "filtering"},
+                        },
+                        {
+                            "binding": 3,
+                            "visibility": js.GPUShaderStage.VERTEX,
+                            "buffer": {"type": "read-only-storage"},
+                        },
+                        {
+                            "binding": 4,
+                            "visibility": js.GPUShaderStage.VERTEX,
+                            "buffer": {"type": "read-only-storage"},
+                        },
+                        {
+                            "binding": 5,
+                            "visibility": js.GPUShaderStage.VERTEX,
+                            "buffer": {"type": "read-only-storage"},
+                        },
+                    ],
+                }
+            )
+        )
+
+    def _create_bind_group(self):
+        self._bind_group = self.gpu.device.createBindGroup(
+            to_js(
+                {
+                    "layout": self._bind_group_layout,
+                    "entries": [
+                        {"binding": 0, "resource": {"buffer": self.gpu.uniform_buffer}},
+                        {
+                            "binding": 1,
+                            "resource": self.gpu.colormap_texture.createView(),
+                        },
+                        {"binding": 2, "resource": self.gpu.colormap_sampler},
+                        {
+                            "binding": 3,
+                            "resource": {"buffer": self._buffers["vertices"]},
+                        },
+                        {"binding": 4, "resource": {"buffer": self._buffers["edges"]}},
+                        {"binding": 5, "resource": {"buffer": self._buffers["trigs"]}},
+                    ],
+                }
+            )
+        )
+
+    def _create_pipeline_layout(self):
+        self._pipeline_layout = self.gpu.device.createPipelineLayout(
+            to_js({"bindGroupLayouts": [self._bind_group_layout]})
+        )
+
+    def _create_pipelines(self, shader_code):
+        shader_module = self.gpu.device.createShaderModule(to_js({"code": shader_code}))
+        edges_pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "layout": self._pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexEdge",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentEdge",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {"topology": "line-list"},
+                    "depthStencil": self.gpu.depth_stencil,
+                }
+            )
+        )
+
+        trigs_pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "layout": self._pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexTrig",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentTrig",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {"topology": "triangle-list"},
+                    "depthStencil": self.gpu.depth_stencil,
+                }
+            )
+        )
+
+        self.pipelines = {
+            "edges": edges_pipeline,
+            "trigs": trigs_pipeline,
+        }
+
+    def draw(self, encoder):
+        encoder.setPipeline(self.pipelines["edges"])
+        encoder.setBindGroup(0, self._bind_group)
+        encoder.draw(2, self.n_edges, 0, 0)
+
+        encoder.setPipeline(self.pipelines["trigs"])
+        encoder.setBindGroup(0, self._bind_group)
+        encoder.draw(3, self.n_trigs, 0, 0)
+
+
 class ClippingPlane(ct.Structure):
     _fields_ = [("normal", ct.c_float * 3), ("dist", ct.c_float)]
 
@@ -150,268 +436,35 @@ def create_colormap(device):
     return texture, sampler
 
 
-def create_buffers(device):
-    uniform_buffer = device.createBuffer(
-        to_js(
-            {
-                "size": len(bytes(Uniforms())),
-                "usage": js.GPUBufferUsage.UNIFORM | js.GPUBufferUsage.COPY_DST,
-            }
-        )
-    )
-
-    vertices, edges, trigs = generate_data()
-    vertex_buffer = device.createBuffer(
-        to_js(
-            {
-                "size": vertices.length * 4,
-                "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
-            }
-        )
-    )
-
-    edges_buffer = device.createBuffer(
-        to_js(
-            {
-                "size": edges.length * 4,
-                "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
-            }
-        )
-    )
-
-    trig_buffer = device.createBuffer(
-        to_js(
-            {
-                "size": trigs.length * 4,
-                "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
-            }
-        )
-    )
-
-    device.queue.writeBuffer(vertex_buffer, 0, vertices)
-    device.queue.writeBuffer(edges_buffer, 0, edges)
-    device.queue.writeBuffer(trig_buffer, 0, trigs)
-
-    return uniform_buffer, vertex_buffer, edges_buffer, trig_buffer
-
-
 async def main(canvas=None, shader_url="./shader.wgsl"):
-
     canvas = await init_canvas(canvas)
-
     adapter = await js.navigator.gpu.requestAdapter()
+
     if not adapter:
         abort()
 
     device = await adapter.requestDevice()
     format = js.navigator.gpu.getPreferredCanvasFormat()
 
-    context = canvas.getContext("webgpu")
-    context.configure(
-        to_js(
-            {
-                "device": device,
-                "format": format,
-                "alphaMode": "premultiplied",
-            }
-        )
-    )
-    colormap_texture, colormap_sampler = create_colormap(device)
+    gpu = WebGPU(device, canvas, format)
 
-    bindGroupLayout = device.createBindGroupLayout(
-        to_js(
-            {
-                "entries": [
-                    {
-                        "binding": 0,
-                        "visibility": js.GPUShaderStage.VERTEX
-                        | js.GPUShaderStage.FRAGMENT,
-                        "buffer": {"type": "uniform"},
-                    },
-                    {
-                        "binding": 1,
-                        "visibility": js.GPUShaderStage.FRAGMENT,
-                        "texture": {
-                            "sampleType": "float",
-                            "viewDimension": "1d",
-                            "multisamples": False,
-                        },
-                    },
-                    {
-                        "binding": 2,
-                        "visibility": js.GPUShaderStage.FRAGMENT,
-                        "sampler": {"type": "filtering"},
-                    },
-                    {
-                        "binding": 3,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                    {
-                        "binding": 4,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                    {
-                        "binding": 5,
-                        "visibility": js.GPUShaderStage.VERTEX,
-                        "buffer": {"type": "read-only-storage"},
-                    },
-                ],
-            }
-        )
-    )
+    from netgen.occ import unit_square
 
-    uniform_buffer, vertex_buffer, edge_buffer, trig_buffer = create_buffers(device)
-
-    bind_group = device.createBindGroup(
-        to_js(
-            {
-                "layout": bindGroupLayout,
-                "entries": [
-                    {"binding": 0, "resource": {"buffer": uniform_buffer}},
-                    {"binding": 1, "resource": colormap_texture.createView()},
-                    {"binding": 2, "resource": colormap_sampler},
-                    {"binding": 3, "resource": {"buffer": vertex_buffer}},
-                    {"binding": 4, "resource": {"buffer": edge_buffer}},
-                    {"binding": 5, "resource": {"buffer": trig_buffer}},
-                ],
-            }
-        )
-    )
-
-    pipelineLayout = device.createPipelineLayout(
-        to_js({"bindGroupLayouts": [bindGroupLayout]})
-    )
-
+    mesh = unit_square.GenerateMesh(maxh=0.2)
     shader_code = await (await js.fetch(shader_url)).text()
-    shader_module = device.createShaderModule(to_js({"code": shader_code}))
-    render_pipeline_edges = device.createRenderPipeline(
-        to_js(
-            {
-                "layout": pipelineLayout,
-                "vertex": {
-                    "module": shader_module,
-                    "entryPoint": "mainVertexEdge",
-                },
-                "fragment": {
-                    "module": shader_module,
-                    "entryPoint": "mainFragmentEdge",
-                    "targets": [{"format": format}],
-                },
-                "primitive": {"topology": "line-list"},
-                "depthStencil": {
-                    "format": "depth24plus",
-                    "depthWriteEnabled": True,
-                    "depthCompare": "less-equal",
-                },
-            }
-        )
-    )
-
-    render_pipeline_trigs = device.createRenderPipeline(
-        to_js(
-            {
-                "layout": pipelineLayout,
-                "vertex": {
-                    "module": shader_module,
-                    "entryPoint": "mainVertexTrig",
-                },
-                "fragment": {
-                    "module": shader_module,
-                    "entryPoint": "mainFragmentTrig",
-                    "targets": [{"format": format}],
-                },
-                "primitive": {"topology": "triangle-list"},
-                "depthStencil": {
-                    "format": "depth24plus",
-                    "depthWriteEnabled": True,
-                    "depthCompare": "less-equal",
-                },
-            }
-        )
-    )
-
-    depthTexture = device.createTexture(
-        to_js(
-            {
-                "size": [canvas.width, canvas.height, 1],
-                "format": "depth24plus",
-                "usage": js.GPUTextureUsage.RENDER_ATTACHMENT,
-            }
-        )
-    )
-
-    uniforms = Uniforms()
-    uniforms.do_clipping = 1
-    uniforms.clipping_plane.normal[0] = 1
-    uniforms.clipping_plane.normal[1] = 0
-    uniforms.clipping_plane.normal[2] = 0
-    uniforms.clipping_plane.dist = 1
-    uniforms.colormap.min = 0.0
-    uniforms.colormap.max = 0.0
-    uniforms.scaling.im = 0.0
-    uniforms.scaling.re = 0.0
-    uniforms.aspect = 0.0
-    uniforms.eval_mode = 0
-
-    for i in range(16):
-        uniforms.mat[i] = 0.0
-
-    for i in [0, 5, 10]:
-        uniforms.mat[i] = 1.8
-
-    uniforms.mat[15] = 1.0
-
-    # translate to center
-    uniforms.mat[12] = -0.5 * 1.8
-    uniforms.mat[13] = -0.5 * 1.8
+    mesh_object = MeshRenderObject(mesh, gpu, shader_code)
 
     async def update(time):
-        uniforms.mat[12] += _position[0] / canvas.width
-        uniforms.mat[13] += _position[1] / canvas.height
+        gpu.uniforms.mat[12] += _position[0] / canvas.width
+        gpu.uniforms.mat[13] += _position[1] / canvas.height
         _position[0] = 0
         _position[1] = 0
-        # print("render", time)
-        # uniforms.clipping_plane.dist = math.sin(time/300)* 0.5 - 0.5
-        data = bytes(uniforms)
-        buffer = js.Uint8Array.new(data)
-        device.queue.writeBuffer(uniform_buffer, 0, buffer)
+        gpu.update_uniform_buffer()
 
         command_encoder = device.createCommandEncoder()
 
-        render_pass_encoder = command_encoder.beginRenderPass(
-            to_js(
-                {
-                    "colorAttachments": [
-                        {
-                            "view": context.getCurrentTexture().createView(),
-                            "clearValue": {"r": 1, "g": 1, "b": 1, "a": 1},
-                            "loadOp": "clear",
-                            "storeOp": "store",
-                        }
-                    ],
-                    "depthStencilAttachment": {
-                        "view": depthTexture.createView(
-                            to_js({"format": "depth24plus", "aspect": "all"})
-                        ),
-                        "depthLoadOp": "clear",
-                        "depthStoreOp": "store",
-                        "depthClearValue": 1.0,
-                    },
-                },
-            )
-        )
-        render_pass_encoder.setViewport(0, 0, canvas.width, canvas.height, 0.0, 1.0)
-
-        render_pass_encoder.setPipeline(render_pipeline_edges)
-        render_pass_encoder.setBindGroup(0, bind_group)
-        render_pass_encoder.draw(2, len(edge_buffer) // 4 // 2, 0, 0)
-
-        render_pass_encoder.setPipeline(render_pipeline_trigs)
-        render_pass_encoder.setBindGroup(0, bind_group)
-        render_pass_encoder.draw(3, len(trig_buffer) // 4 // 3, 0, 0)
-
+        render_pass_encoder = gpu.begin_render_pass(command_encoder)
+        mesh_object.draw(render_pass_encoder)
         render_pass_encoder.end()
 
         device.queue.submit([command_encoder.finish()])
