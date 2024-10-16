@@ -30,6 +30,22 @@ class Uniforms(ct.Structure):
         ("padding", ct.c_uint32),
     ]
 
+    def __init__(self):
+        self.do_clipping = 1
+        self.clipping_plane.normal[0] = 1
+        self.clipping_plane.normal[1] = 0
+        self.clipping_plane.normal[2] = 0
+        self.clipping_plane.dist = 1
+        self.colormap.min = 0.0
+        self.colormap.max = 0.0
+        self.scaling.im = 0.0
+        self.scaling.re = 0.0
+        self.aspect = 0.0
+        self.eval_mode = 0
+
+        for i in range(16):
+            self.mat[i] = 0.0
+
 
 class InputHandler:
     def __init__(self, gpu):
@@ -64,6 +80,14 @@ class WebGPU:
         self.format = js.navigator.gpu.getPreferredCanvasFormat()
         self.canvas = canvas
 
+        self.uniforms = Uniforms()
+
+        uniforms_size = len(bytes(self.uniforms))
+        if uniforms_size % 16:
+            raise ValueError(
+                f"Uniforms size must be multiple of 16, current size: {uniforms_size}"
+            )
+
         self.context = canvas.getContext("webgpu")
         self.context.configure(
             to_js(
@@ -77,7 +101,7 @@ class WebGPU:
         self.uniform_buffer = device.createBuffer(
             to_js(
                 {
-                    "size": len(bytes(Uniforms())),
+                    "size": len(bytes(self.uniforms)),
                     "usage": js.GPUBufferUsage.UNIFORM | js.GPUBufferUsage.COPY_DST,
                 }
             )
@@ -99,31 +123,6 @@ class WebGPU:
                 }
             )
         )
-        uniforms = Uniforms()
-        uniforms.do_clipping = 1
-        uniforms.clipping_plane.normal[0] = 1
-        uniforms.clipping_plane.normal[1] = 0
-        uniforms.clipping_plane.normal[2] = 0
-        uniforms.clipping_plane.dist = 1
-        uniforms.colormap.min = 0.0
-        uniforms.colormap.max = 0.0
-        uniforms.scaling.im = 0.0
-        uniforms.scaling.re = 0.0
-        uniforms.aspect = 0.0
-        uniforms.eval_mode = 0
-
-        for i in range(16):
-            uniforms.mat[i] = 0.0
-
-        for i in [0, 5, 10]:
-            uniforms.mat[i] = 1.8
-
-        uniforms.mat[15] = 1.0
-
-        # translate to center
-        uniforms.mat[12] = -0.5 * 1.8
-        uniforms.mat[13] = -0.5 * 1.8
-        self.uniforms = uniforms
 
     def update_uniform_buffer(self):
         buffer = js.Uint8Array.new(bytes(self.uniforms))
@@ -429,6 +428,16 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
     mesh = unit_square.GenerateMesh(maxh=0.2)
     shader_code = await (await js.fetch(shader_url)).text()
     mesh_object = MeshRenderObject(mesh, gpu, shader_code)
+
+    # move mesh to center and scale it
+    for i in [0, 5, 10]:
+        gpu.uniforms.mat[i] = 1.8
+
+    gpu.uniforms.mat[15] = 1.0
+
+    # translate to center
+    gpu.uniforms.mat[12] = -0.5 * 1.8
+    gpu.uniforms.mat[13] = -0.5 * 1.8
 
     def render(time):
         gpu.update_uniform_buffer()
