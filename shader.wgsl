@@ -3,21 +3,6 @@ struct Edge { v: vec2<u32> };
 struct Segment { v: vec2<u32>, index: i32 };
 struct Trig { v: vec3<u32>, index: i32 };
 
-struct ClippingPlane {
-  normal: vec3<f32>,
-  dist: f32,
-};
-
-struct Colormap {
-  min: f32,
-  max: f32,
-}
-
-struct Complex {
-  re: f32,
-  imag: f32,
-};
-
 struct Uniforms {
   mat: mat4x4<f32>,
   clipping_plane: vec4<f32>,

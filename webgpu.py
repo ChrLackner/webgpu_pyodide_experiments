@@ -1,5 +1,4 @@
 import ctypes as ct
-import math
 import sys
 
 import js
@@ -7,12 +6,37 @@ import pyodide.ffi
 from pyodide.ffi import create_proxy
 
 
+class ClippingPlaneUniform(ct.Structure):
+    _fields_ = [("normal", ct.c_float * 3), ("dist", ct.c_float)]
+
+
+class ComplexUniform(ct.Structure):
+    _fields_ = [("re", ct.c_float), ("im", ct.c_float)]
+
+
+class ColormapUniform(ct.Structure):
+    _fields_ = [("min", ct.c_float), ("max", ct.c_float)]
+
+
+class Uniforms(ct.Structure):
+    _fields_ = [
+        ("mat", ct.c_float * 16),
+        ("clipping_plane", ClippingPlaneUniform),
+        ("colormap", ColormapUniform),
+        ("scaling", ComplexUniform),
+        ("aspect", ct.c_float),
+        ("eval_mode", ct.c_uint32),
+        ("do_clipping", ct.c_uint32),
+        ("padding", ct.c_uint32),
+    ]
+
+
 class WebGPU:
     """WebGPU management class, handles "global" state, like device, canvas, colormap and uniforms"""
 
-    def __init__(self, device, canvas, format):
+    def __init__(self, device, canvas):
         self.device = device
-        self.format = format
+        self.format = js.navigator.gpu.getPreferredCanvasFormat()
         self.canvas = canvas
 
         self.context = canvas.getContext("webgpu")
@@ -20,7 +44,7 @@ class WebGPU:
             to_js(
                 {
                     "device": device,
-                    "format": format,
+                    "format": self.format,
                     "alphaMode": "premultiplied",
                 }
             )
@@ -33,7 +57,6 @@ class WebGPU:
                 }
             )
         )
-
         self.colormap_texture, self.colormap_sampler = create_colormap(device)
         self.depth_format = "depth24plus"
         self.depth_stencil = {
@@ -81,6 +104,41 @@ class WebGPU:
         buffer = js.Uint8Array.new(bytes(self.uniforms))
         self.device.queue.writeBuffer(self.uniform_buffer, 0, buffer)
 
+    def get_bindings(self):
+        """Returns layout and resource arrays used to create binding layout and binding groups
+        Current entires are: Uniforms, colormap texture, colormap sampler"""
+
+        FRAGMENT = js.GPUShaderStage.FRAGMENT
+        BOTH = js.GPUShaderStage.VERTEX | FRAGMENT
+
+        layouts = [
+            {
+                "visibility": BOTH,
+                "buffer": {"type": "uniform"},
+            },
+            {
+                "visibility": FRAGMENT,
+                "texture": {
+                    "sampleType": "float",
+                    "viewDimension": "1d",
+                    "multisamples": False,
+                },
+            },
+            {
+                "visibility": FRAGMENT,
+                "sampler": {"type": "filtering"},
+            },
+        ]
+        resources = [
+            {"resource": res}
+            for res in [
+                {"buffer": self.uniform_buffer},
+                self.colormap_texture.createView(),
+                self.colormap_sampler,
+            ]
+        ]
+        return layouts, resources
+
     def begin_render_pass(self, command_encoder):
         render_pass_encoder = command_encoder.beginRenderPass(
             to_js(
@@ -118,10 +176,8 @@ class MeshRenderObject:
         self.gpu = gpu
 
         self._create_buffers()
-        self._create_bind_group_layout()
-        self._create_bind_group()
 
-        self._create_pipeline_layout()
+        self._create_bind_group()
         self._create_pipelines(shader_code)
 
     def _create_buffers(self):
@@ -165,70 +221,36 @@ class MeshRenderObject:
             self.gpu.device.queue.writeBuffer(buffers[name], 0, values)
         self._buffers = buffers
 
-    def _create_bind_group_layout(self):
-        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
-            to_js(
+    def _create_bind_group(self):
+        """Get binding data from WebGPU class and add values used for mesh rendering"""
+        VERTEX = js.GPUShaderStage.VERTEX
+        FRAGMENT = js.GPUShaderStage.FRAGMENT
+        BOTH = VERTEX | FRAGMENT
+
+        layouts, resources = self.gpu.get_bindings()
+
+        for name in ["vertices", "edges", "trigs"]:
+            layouts.append(
                 {
-                    "entries": [
-                        {
-                            "binding": 0,
-                            "visibility": js.GPUShaderStage.VERTEX
-                            | js.GPUShaderStage.FRAGMENT,
-                            "buffer": {"type": "uniform"},
-                        },
-                        {
-                            "binding": 1,
-                            "visibility": js.GPUShaderStage.FRAGMENT,
-                            "texture": {
-                                "sampleType": "float",
-                                "viewDimension": "1d",
-                                "multisamples": False,
-                            },
-                        },
-                        {
-                            "binding": 2,
-                            "visibility": js.GPUShaderStage.FRAGMENT,
-                            "sampler": {"type": "filtering"},
-                        },
-                        {
-                            "binding": 3,
-                            "visibility": js.GPUShaderStage.VERTEX,
-                            "buffer": {"type": "read-only-storage"},
-                        },
-                        {
-                            "binding": 4,
-                            "visibility": js.GPUShaderStage.VERTEX,
-                            "buffer": {"type": "read-only-storage"},
-                        },
-                        {
-                            "binding": 5,
-                            "visibility": js.GPUShaderStage.VERTEX,
-                            "buffer": {"type": "read-only-storage"},
-                        },
-                    ],
+                    "visibility": BOTH,
+                    "buffer": {"type": "read-only-storage"},
                 }
             )
+            resources.append({"resource": {"buffer": self._buffers[name]}})
+
+        for i in range(len(layouts)):
+            layouts[i]["binding"] = i
+            resources[i]["binding"] = i
+
+        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
+            to_js({"entries": layouts})
         )
 
-    def _create_bind_group(self):
         self._bind_group = self.gpu.device.createBindGroup(
             to_js(
                 {
                     "layout": self._bind_group_layout,
-                    "entries": [
-                        {"binding": 0, "resource": {"buffer": self.gpu.uniform_buffer}},
-                        {
-                            "binding": 1,
-                            "resource": self.gpu.colormap_texture.createView(),
-                        },
-                        {"binding": 2, "resource": self.gpu.colormap_sampler},
-                        {
-                            "binding": 3,
-                            "resource": {"buffer": self._buffers["vertices"]},
-                        },
-                        {"binding": 4, "resource": {"buffer": self._buffers["edges"]}},
-                        {"binding": 5, "resource": {"buffer": self._buffers["trigs"]}},
-                    ],
+                    "entries": resources,
                 }
             )
         )
@@ -239,6 +261,7 @@ class MeshRenderObject:
         )
 
     def _create_pipelines(self, shader_code):
+        self._create_pipeline_layout()
         shader_module = self.gpu.device.createShaderModule(to_js({"code": shader_code}))
         edges_pipeline = self.gpu.device.createRenderPipeline(
             to_js(
@@ -291,31 +314,6 @@ class MeshRenderObject:
         encoder.setPipeline(self.pipelines["trigs"])
         encoder.setBindGroup(0, self._bind_group)
         encoder.draw(3, self.n_trigs, 0, 0)
-
-
-class ClippingPlane(ct.Structure):
-    _fields_ = [("normal", ct.c_float * 3), ("dist", ct.c_float)]
-
-
-class Complex(ct.Structure):
-    _fields_ = [("re", ct.c_float), ("im", ct.c_float)]
-
-
-class Colormap(ct.Structure):
-    _fields_ = [("min", ct.c_float), ("max", ct.c_float)]
-
-
-class Uniforms(ct.Structure):
-    _fields_ = [
-        ("mat", ct.c_float * 16),
-        ("clipping_plane", ClippingPlane),
-        ("colormap", Colormap),
-        ("scaling", Complex),
-        ("aspect", ct.c_float),
-        ("eval_mode", ct.c_uint32),
-        ("do_clipping", ct.c_uint32),
-        ("padding", ct.c_uint32),
-    ]
 
 
 def to_js(value):
@@ -377,7 +375,7 @@ def on_mousemove(ev):
         js.requestAnimationFrame(_render_function)
 
 
-async def init_canvas(canvas):
+def init_canvas(canvas):
     if not js.navigator.gpu:
         abort()
 
@@ -437,16 +435,15 @@ def create_colormap(device):
 
 
 async def main(canvas=None, shader_url="./shader.wgsl"):
-    canvas = await init_canvas(canvas)
+    canvas = init_canvas(canvas)
     adapter = await js.navigator.gpu.requestAdapter()
 
     if not adapter:
         abort()
 
     device = await adapter.requestDevice()
-    format = js.navigator.gpu.getPreferredCanvasFormat()
 
-    gpu = WebGPU(device, canvas, format)
+    gpu = WebGPU(device, canvas)
 
     from netgen.occ import unit_square
 
