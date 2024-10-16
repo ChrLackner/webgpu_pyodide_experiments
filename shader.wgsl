@@ -2,7 +2,6 @@ struct Edge { v: vec2<u32> };
 
 struct Segment { v: vec2<u32>, index: i32 };
 struct Trig { v: vec3<u32>, index: i32 };
-struct Quad { v: vec4<u32>, index: i32 };
 
 struct ClippingPlane {
   normal: vec3<f32>,
@@ -62,28 +61,26 @@ fn getColor(value: f32) -> vec4<f32> {
 }
 
 @vertex
-fn mainVertexTrig(@builtin(vertex_index) vertexId: u32) -> VertexOutput {
-    var trigId = vertexId / 3;
+fn mainVertexTrig(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) trigId: u32) -> VertexOutput {
     var trig = trigs[trigId];
-    var vid = trig.v[vertexId % 3];
+    var vid: u32 = trig.v[vertexId];
     var p = vertices[vid];
     var position = calcPosition(p);
     position.z = 0.01;
     var lam: vec3<f32> = vec3<f32>(0.);
-    if vertexId % 3 == 0 { lam[0] = 1.0; } else if vertexId % 3 == 1 { lam[1] = 1.0; } else { lam[2] = 1.0; }
+    lam[vertexId] = 1.0;
     var value: f32 = p.x;
     return VertexOutput(position, p, value, lam);
 }
 
 @vertex
-fn mainVertexEdge(@builtin(vertex_index) vertexId: u32) -> VertexOutput {
-    var edgeId = vertexId / 2;
+fn mainVertexEdge(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) edgeId: u32) -> VertexOutput {
     var edge = edges[edgeId];
-    var vid = edge.v[vertexId % 2];
+    var vid: u32 = edge.v[vertexId];
     var p = vertices[vid];
     var position = calcPosition(p);
     var lam: vec3<f32> = vec3<f32>(0.);
-    if vertexId % 2 == 0 { lam[0] = 1.0; } else { lam[1] = 1.0;}
+    lam[vertexId] = 1.0;
     var value: f32 = p.x; // todo: evaluate function here
     return VertexOutput(position, p, value, lam);
 }

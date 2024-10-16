@@ -59,7 +59,7 @@ def generate_data():
             trigs.append(t.vertices[i].nr - 1)
             edges.append(t.vertices[i].nr - 1)
             edges.append(t.vertices[(i + 1) % 3].nr - 1)
-        trigs.append(0)
+        trigs.append(t.index)
 
     vertex_array = js.Float32Array.new(vertices)
     trigs_array = js.Int32Array.new(trigs)
@@ -406,11 +406,11 @@ async def main(canvas=None, shader_url="./shader.wgsl"):
 
         render_pass_encoder.setPipeline(render_pipeline_edges)
         render_pass_encoder.setBindGroup(0, bind_group)
-        render_pass_encoder.draw(len(edge_buffer) / 4, 1, 0, 0)
+        render_pass_encoder.draw(2, len(edge_buffer) // 4 // 2, 0, 0)
 
         render_pass_encoder.setPipeline(render_pipeline_trigs)
         render_pass_encoder.setBindGroup(0, bind_group)
-        render_pass_encoder.draw(len(trig_buffer) / 4, 1, 0, 0)
+        render_pass_encoder.draw(3, len(trig_buffer) // 4 // 3, 0, 0)
 
         render_pass_encoder.end()
 
