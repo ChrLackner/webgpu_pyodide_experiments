@@ -1,10 +1,11 @@
 import asyncio
 import http.server
 import socketserver
-import websockets
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 from threading import Timer
+
+import websockets
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 
 # Disable caching in HTTP server

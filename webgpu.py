@@ -1,9 +1,10 @@
+import ctypes as ct
+import math
+import sys
+
 import js
 import pyodide.ffi
 from pyodide.ffi import create_proxy
-import sys
-import ctypes as ct
-import math
 
 
 class ClippingPlane(ct.Structure):
@@ -73,12 +74,12 @@ _position = [0, 0]
 _is_moving = False
 
 
-def on_mousedown(ev):
+def on_mousedown(_):
     global _is_moving
     _is_moving = True
 
 
-def on_mouseup(ev):
+def on_mouseup(_):
     global _is_moving
     _is_moving = False
 
