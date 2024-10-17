@@ -1,12 +1,29 @@
 import js
+import sys
 
 from .colormap import Colormap
 from .uniforms import Uniforms
 from .utils import to_js
+from .input_handler import InputHandler
 
+async def init_webgpu(canvas):
+    """Initialize WebGPU, create device and canvas"""
+    if not js.navigator.gpu:
+        js.alert("WebGPU is not supported")
+        sys.exit(1)
+
+    adapter = await js.navigator.gpu.requestAdapter()
+
+    if not adapter:
+        js.alert("WebGPU is not supported")
+        sys.exit(1)
+
+    device = await adapter.requestDevice()
+
+    return WebGPU(device, canvas)
 
 class WebGPU:
-    """WebGPU management class, handles "global" state, like device, canvas, colormap and uniforms"""
+    """WebGPU management class, handles "global" state, like device, canvas, frame/depth buffer, colormap and uniforms"""
 
     def __init__(self, device, canvas):
         self.render_function = None
@@ -43,6 +60,8 @@ class WebGPU:
                 }
             )
         )
+        self.input_handler = InputHandler(canvas, self.uniforms)
+
 
     def begin_render_pass(self, command_encoder):
         render_pass_encoder = command_encoder.beginRenderPass(
@@ -76,3 +95,7 @@ class WebGPU:
         self.depth_texture.destroy()
         del self.uniforms
         del self.colormap
+
+        # unregister is needed to remove circular references
+        self.input_handler.unregister_callbacks()
+        del self.input_handler

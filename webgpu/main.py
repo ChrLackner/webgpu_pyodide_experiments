@@ -1,35 +1,19 @@
-import sys
+"""Main file for the webgpu example, creates a small 2d mesh and renders it using WebGPU"""
 
 import js
 from pyodide.ffi import create_proxy
 
-from .gpu import WebGPU
-from .input_handler import InputHandler
+from .gpu import init_webgpu
 from .mesh import MeshRenderObject
 
 gpu = None
-input_handler = None
 mesh_object = None
 
 
-async def main(canvas=None):
-    global gpu, input_handler, mesh_object
+async def main():
+    global gpu, mesh_object
 
-    if not js.navigator.gpu:
-        js.alert("WebGPU is not supported")
-        sys.exit(1)
-
-    canvas = canvas or js.document.getElementById("canvas")
-    adapter = await js.navigator.gpu.requestAdapter()
-
-    if not adapter:
-        js.alert("WebGPU is not supported")
-        sys.exit(1)
-
-    device = await adapter.requestDevice()
-
-    gpu = WebGPU(device, canvas)
-    input_handler = InputHandler(gpu)
+    gpu = await init_webgpu(js.document.getElementById("canvas"))
 
     from netgen.occ import unit_square
 
@@ -52,28 +36,27 @@ async def main(canvas=None):
         # copy camera position etc. to GPU
         gpu.uniforms.update_buffer()
 
-        command_encoder = device.createCommandEncoder()
+        command_encoder = gpu.device.createCommandEncoder()
 
         render_pass_encoder = gpu.begin_render_pass(command_encoder)
         mesh_object.draw(render_pass_encoder)
         render_pass_encoder.end()
 
-        device.queue.submit([command_encoder.finish()])
+        gpu.device.queue.submit([command_encoder.finish()])
 
-    gpu.render_function = create_proxy(render)
+    render_function = create_proxy(render)
+    gpu.input_handler.render_function = render_function
 
-    js.requestAnimationFrame(gpu.render_function)
+    js.requestAnimationFrame(render_function)
 
 
 def cleanup():
     print("cleanup")
-    global gpu, input_handler, mesh_object
-    if "input_handler" in globals():
-        if input_handler is not None:
-            input_handler.unregister_callbacks()
-        del mesh_object
-        del input_handler
+    global gpu, mesh_object
+    if "gpu" in globals():
         del gpu
+    if "mesh_object" in globals():
+        del mesh_object
 
 
 def reload_package(package_name):

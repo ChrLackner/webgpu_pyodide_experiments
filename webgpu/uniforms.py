@@ -29,6 +29,8 @@ class ColormapUniform(ct.Structure):
 
 
 class Uniforms(ct.Structure):
+    """Uniforms class, derived from ctypes.Structure to ensure correct memory layout"""
+
     _fields_ = [
         ("mat", ct.c_float * 16),
         ("clipping_plane", ClippingPlaneUniform),
@@ -85,6 +87,7 @@ class Uniforms(ct.Structure):
         return [{"binding": Binding.UNIFORMS, "resource": {"buffer": self.buffer}}]
 
     def update_buffer(self):
+        """Copy the current data to the GPU buffer"""
         data = js.Uint8Array.new(bytes(self))
         self.device.queue.writeBuffer(self.buffer, 0, data)
 
