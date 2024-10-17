@@ -15,28 +15,7 @@ wget https://ngsolve.org/files/ngsolve_pyodide_0.26.2.tar.bz2
 tar xvf ngsolve_pyodide_0.26.2.tar.bz2
 ```
 
-## Running as a Standalone HTML Server
-
-To serve the project locally, use Python's built-in HTTP server:
-
-```bash
-python -m http.server
-```
-
-Then open your browser and navigate to `http://localhost:8000`.
-
-## Running in Jupyter Notebook
-
-To run the project in a Jupyter Notebook, first launch Jupyter:
-
-```bash
-jupyter notebook
-```
-
-Open the `webgpu.ipynb` file within the notebook interface and execute the cells to interact with WebGPU and Pyodide.
-
-Important: In Jupyter Notebook, running the same cell multiple times can lead to memory issues. Always clear the notebook, then save and reload the page before re-executing the code after making changes.
-
-## Developing
+## Running the server
 
 Run `python dev.py` and open `http://localhost:8000/dev.html`. Everytime you change some code, the website is automatically hot-reloaded (pyodide stays alive) and `webgpu.py` reloaded and executed.
+For the hot-reload feature you need to have 'websockets' and 'watchdog' installed

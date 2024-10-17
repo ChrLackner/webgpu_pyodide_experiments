@@ -14,29 +14,6 @@
       }
     </style>
     <canvas width="768" height="768" id="canvas"></canvas>
-    <script>
-      async function main() {
-        console.log("loading pyodide", performance.now());
-        // const blob = await (await fetch("./pyodide/snapshot.bin")).blob();
-
-        let pyodide = await loadPyodide({
-          // _loadSnapshot: blob.arrayBuffer(),
-        });
-
-        // pyodide.setDebug(true);
-        console.log("loaded pyodide", performance.now());
-        await pyodide.loadPackage(["netgen"]);
-        console.log("loaded netgen", performance.now());
-        const python_code = await (
-          await fetch("./webgpu.py", { method: "GET", cache: "no-cache" })
-        ).text();
-        const main_function = pyodide.runPython(python_code);
-        var canvas = document.getElementById("canvas");
-        console.log("loaded webgpu code", performance.now());
-        await main_function(canvas, "./shader.wgsl");
-        console.log("called main", performance.now());
-      }
-      main();
-    </script>
+    <script src="./init.js"></script>
   </body>
 </html>
