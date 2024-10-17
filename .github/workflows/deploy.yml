@@ -27,7 +27,7 @@ jobs:
     - name: Serve static content
       run: |
         mkdir -p public
-        mv webgpu *.html pyodide public/
+        mv webgpu *.js *.html pyodide public/
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v1
