@@ -13,6 +13,7 @@ class Binding:
     VERTICES = 3
     EDGES = 4
     TRIGS = 5
+    TRIG_FUNCTION_VALUES = 6
 
 
 class ClippingPlaneUniform(ct.Structure):

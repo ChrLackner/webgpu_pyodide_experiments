@@ -31,17 +31,20 @@ class MeshRenderObject:
 
         trigs = []
         edges = []
+        trig_function_values = []
         for t in m.Elements2D():
             for i in range(3):
                 trigs.append(t.vertices[i].nr - 1)
                 edges.append(t.vertices[i].nr - 1)
                 edges.append(t.vertices[(i + 1) % 3].nr - 1)
+                trig_function_values.append(vertices[4 * (t.vertices[i].nr - 1)])
             trigs.append(t.index)
 
         data = {
             "vertices": js.Float32Array.new(vertices),
             "edges": js.Int32Array.new(edges),
             "trigs": js.Int32Array.new(trigs),
+            "trig_function_values": js.Float32Array.new(trig_function_values),
         }
 
         buffers = {}
@@ -59,7 +62,7 @@ class MeshRenderObject:
 
     def get_binding_layout(self):
         layouts = []
-        for name in ["vertices", "edges", "trigs"]:
+        for name in self._buffers.keys():
             binding = getattr(Binding, name.upper())
             layouts.append(
                 {
@@ -72,7 +75,7 @@ class MeshRenderObject:
 
     def get_binding(self):
         resources = []
-        for name in ["vertices", "edges", "trigs"]:
+        for name in self._buffers.keys():
             binding = getattr(Binding, name.upper())
             resources.append(
                 {"binding": binding, "resource": {"buffer": self._buffers[name]}}

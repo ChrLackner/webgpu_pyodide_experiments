@@ -68,32 +68,46 @@ async def main(canvas=None):
 def cleanup():
     print("cleanup")
     global gpu, input_handler, mesh_object
-    if input_handler is not None:
-        input_handler.unregister_callbacks()
-    del mesh_object
-    del input_handler
-    del gpu
+    if "input_handler" in globals():
+        if input_handler is not None:
+            input_handler.unregister_callbacks()
+        del mesh_object
+        del input_handler
+        del gpu
+
+
+def reload_package(package_name):
+    """Reload python package and all submodules (searches in modules for references to other submodules)"""
+    import importlib
+    import os
+    import types
+
+    package = importlib.import_module(package_name)
+    assert hasattr(package, "__package__")
+    file_name = package.__file__
+    package_dir = os.path.dirname(file_name) + os.sep
+    reloaded_modules = {file_name: package}
+
+    def reload_recursive(module):
+        module = importlib.reload(module)
+
+        for var in vars(module).values():
+            if isinstance(var, types.ModuleType):
+                file_name = getattr(var, "__file__", None)
+                if file_name is not None and file_name.startswith(package_dir):
+                    if file_name not in reloaded_modules:
+                        reloaded_modules[file_name] = reload_recursive(var)
+
+        return module
+
+    reload_recursive(package)
+    return reloaded_modules
 
 
 async def reload():
     print("reload")
     cleanup()
-    import glob
-    import importlib
-    import os
+    reload_package("webgpu")
+    from webgpu.main import main
 
-    import webgpu
-    import webgpu.colormap
-    import webgpu.gpu
-    import webgpu.main
-    import webgpu.mesh
-    import webgpu.utils
-
-    dirname = os.path.dirname(__file__)
-    for filename in glob.glob(os.path.join(dirname, "*.py")):
-        if filename.endswith("__init__.py"):
-            continue
-        module_name = os.path.basename(filename)[:-3]
-        webgpu.__dict__[module_name] = importlib.reload(webgpu.__dict__[module_name])
-    webgpu = importlib.reload(webgpu)
-    await webgpu.main.main()
+    await main()

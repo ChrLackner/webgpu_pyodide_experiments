@@ -21,6 +21,7 @@ struct Uniforms {
 @group(0) @binding(3) var<storage> vertices : array<vec3<f32>>;
 @group(0) @binding(4) var<storage> edges : array<Edge>;
 @group(0) @binding(5) var<storage> trigs : array<Trig>;
+@group(0) @binding(6) var<storage> trig_function_values : array<f32>;
 
 struct VertexOutput1d {
   @builtin(position) fragPosition: vec4<f32>,
@@ -88,9 +89,9 @@ fn mainVertexEdge(@builtin(vertex_index) vertexId: u32, @builtin(instance_index)
 @fragment
 fn mainFragmentTrig(@location(0) p: vec3<f32>, @location(1) lam: vec2<f32>, @location(2) id: u32) -> @location(0) vec4<f32> {
     let verts = trigs[id].v;
-    let v0 = vertices[ verts[0] ].x;
-    let v1 = vertices[ verts[1] ].x;
-    let v2 = vertices[ verts[2] ].x;
+    let v0 = trig_function_values[ 3 * id ];
+    let v1 = trig_function_values[ 3 * id + 1];
+    let v2 = trig_function_values[ 3 * id + 2];
 
     checkClipping(p);
 
