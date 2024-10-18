@@ -1,3 +1,108 @@
+fn evalSegP1Basis(x: f32) -> array<f32, 2> {
+    let y = 1.0 - x;
+    return array(x, y);
+}
+
+fn evalSegP1(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP1Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    return result;
+}
+
+fn evalSegP2Basis(x: f32) -> array<f32, 3> {
+    let y = 1.0 - x;
+    return array(x * x, 2.0 * x * y, y * y);
+}
+
+fn evalSegP2(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP2Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    result += basis[2] * seg_function_values[offset + 2 * stride];
+    return result;
+}
+
+fn evalSegP3Basis(x: f32) -> array<f32, 4> {
+    let y = 1.0 - x;
+    return array(x * x * x, 3.0 * x * x * y, 3.0 * x * y * y, y * y * y);
+}
+
+fn evalSegP3(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP3Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    result += basis[2] * seg_function_values[offset + 2 * stride];
+    result += basis[3] * seg_function_values[offset + 3 * stride];
+    return result;
+}
+
+fn evalSegP4Basis(x: f32) -> array<f32, 5> {
+    let y = 1.0 - x;
+    return array(x * x * x * x, 4.0 * x * x * x * y, 6.0 * x * x * y * y, 4.0 * x * y * y * y, y * y * y * y);
+}
+
+fn evalSegP4(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP4Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    result += basis[2] * seg_function_values[offset + 2 * stride];
+    result += basis[3] * seg_function_values[offset + 3 * stride];
+    result += basis[4] * seg_function_values[offset + 4 * stride];
+    return result;
+}
+
+fn evalSegP5Basis(x: f32) -> array<f32, 6> {
+    let y = 1.0 - x;
+    return array(x * x * x * x * x, 5.0 * x * x * x * x * y, 10.0 * x * x * x * y * y, 10.0 * x * x * y * y * y, 5.0 * x * y * y * y * y, y * y * y * y * y);
+}
+
+fn evalSegP5(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP5Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    result += basis[2] * seg_function_values[offset + 2 * stride];
+    result += basis[3] * seg_function_values[offset + 3 * stride];
+    result += basis[4] * seg_function_values[offset + 4 * stride];
+    result += basis[5] * seg_function_values[offset + 5 * stride];
+    return result;
+}
+
+fn evalSegP6Basis(x: f32) -> array<f32, 7> {
+    let y = 1.0 - x;
+    return array(x * x * x * x * x * x, 6.0 * x * x * x * x * x * y, 15.0 * x * x * x * x * y * y, 20.0 * x * x * x * y * y * y, 15.0 * x * x * y * y * y * y, 6.0 * x * y * y * y * y * y, y * y * y * y * y * y);
+}
+
+fn evalSegP6(offset: u32, stride: u32, lam: f32) -> f32 {
+    let basis = evalSegP6Basis(lam);
+    var result: f32 = basis[0] * seg_function_values[offset + 0 * stride];
+    result += basis[1] * seg_function_values[offset + 1 * stride];
+    result += basis[2] * seg_function_values[offset + 2 * stride];
+    result += basis[3] * seg_function_values[offset + 3 * stride];
+    result += basis[4] * seg_function_values[offset + 4 * stride];
+    result += basis[5] * seg_function_values[offset + 5 * stride];
+    result += basis[6] * seg_function_values[offset + 6 * stride];
+    return result;
+}
+
+
+fn evalSeg(id: u32, icomp: u32, lam: f32) -> f32 {
+    let order: u32 = u32(trig_function_values[1]);
+    let ncomp: u32 = u32(trig_function_values[0]);
+    let ndof: u32 = order + 1;
+
+    let offset: u32 = ndof * id + VALUES_OFFSET;
+    let stride: u32 = ncomp;
+
+    if order == 1 { return evalSegP1(offset, stride, lam); }
+    if order == 2 { return evalSegP2(offset, stride, lam); }
+    if order == 3 { return evalSegP3(offset, stride, lam); }
+    if order == 4 { return evalSegP4(offset, stride, lam); }
+    if order == 5 { return evalSegP5(offset, stride, lam); }
+    if order == 6 { return evalSegP6(offset, stride, lam); }
+
+    return 0.0;
+}
 fn evalTrigP1Basis(lam: vec2<f32>) -> array<f32, 3> {
     let x = lam.x;
     let y = lam.y;
@@ -201,11 +306,11 @@ fn evalTrigP6(offset: u32, stride: u32, lam: vec2<f32>) -> f32 {
 
 
 fn evalTrig(id: u32, icomp: u32, lam: vec2<f32>) -> f32 {
-    let order = u32(trig_function_values[1]);
-    let ncomp = u32(trig_function_values[0]);
-    let ndof = (order + 1) * (order + 2) / 2;
+    let order: u32 = u32(trig_function_values[1]);
+    let ncomp: u32 = u32(trig_function_values[0]);
+    let ndof: u32 = (order + 1) * (order + 2) / 2;
 
-    let offset = ndof * id + VALUES_OFFSET;
+    let offset: u32 = ndof * id + VALUES_OFFSET;
     let stride: u32 = ncomp;
 
     if order == 1 { return evalTrigP1(offset, stride, lam); }

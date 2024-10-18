@@ -42,13 +42,13 @@ def getReferenceRules(order, sd):
     return res
 
 
-_eval_trig_template = """
-fn evalTrig{suffix}(id: u32, icomp: u32, lam: vec2<f32>) -> f32 {{
-    let order = u32(trig_function_values[1]);
-    let ncomp = u32(trig_function_values[0]);
-    let ndof = (order + 1) * (order + 2) / 2;
+_eval_template = """
+fn eval{eltype}{suffix}(id: u32, icomp: u32, lam: {lam_type}) -> f32 {{
+    let order: u32 = u32(trig_function_values[1]);
+    let ncomp: u32 = u32(trig_function_values[0]);
+    let ndof: u32 = {ndof_expr};
 
-    let offset = ndof * id + VALUES_OFFSET;
+    let offset: u32 = ndof * id + VALUES_OFFSET;
     let stride: u32 = ncomp;
 
 {switch_order}
@@ -199,6 +199,15 @@ def GenerateInterpolationFunction(et, orders, scal_dims):
         ET.PRISM: "Prism",
         ET.PYRAMID: "Pyramid",
     }[et]
+    ndof_expr = {
+        ET.SEGM: "order+1",
+        ET.TRIG: "(order+1)*(order+2)/2",
+        ET.TET: "(order+1)*(order+2)*(order+3)/6",
+        ET.QUAD: "(order+1)*(order+1)",
+        ET.HEX: "(order+1)*(order+1)*(order+1)",
+        ET.PRISM: "(order+1)*(order+1)*(order+2)/2",
+        ET.PYRAMID: "",
+    }[et]
     result = ""
     for p in orders:
         print("\n\n=============", eltype, p)
@@ -296,14 +305,12 @@ def GenerateInterpolationFunction(et, orders, scal_dims):
         orders_ = sorted(list(set(list(orders) + [1])))
         for p in orders_:
             switch_order += f"    if order == {p} {{ return eval{eltype}P{p}{suffix}(offset, stride, lam); }}\n"
-        result += _eval_trig_template.format(
-            switch_order=switch_order, p=p, suffix=suffix
-        )
+        result += _eval_template.format(**locals())
     return result
 
 
 code = ""
-for et in [ET.SEGM, ET.TRIG, ET.TET][1:2]:
+for et in [ET.SEGM, ET.TRIG, ET.TET][0:2]:
     code += GenerateInterpolationFunction(et, orders=range(1, 7), scal_dims=range(1, 2))
 
 open("../webgpu/eval.wgsl", "w").write(code)

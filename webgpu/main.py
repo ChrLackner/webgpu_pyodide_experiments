@@ -17,7 +17,7 @@ async def main():
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.1))
+    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
     order = 6
     gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
     # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))

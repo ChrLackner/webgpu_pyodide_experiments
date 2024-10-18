@@ -1,6 +1,5 @@
-struct Edge { v: vec2<u32> };
+struct EdgeP1 { p: array<f32, 6> };
 
-struct Segment { v: vec2<u32>, index: i32 };
 struct TrigP1 { p: array<f32, 9>, index: i32 }; // 3 vertices with 3 coordinates each, don't use vec3 due to 16 byte alignment
 struct TrigP2 { p: array<f32, 18>, index: i32 };
 
@@ -21,9 +20,10 @@ const VALUES_OFFSET: u32 = 2; // storing number of components and order of basis
 @group(0) @binding(1) var colormap : texture_1d<f32>;
 @group(0) @binding(2) var colormap_sampler : sampler;
 
-// @group(0) @binding(4) var<storage> edges : array<Edge>;
+@group(0) @binding(4) var<storage> edges_p1 : array<EdgeP1>;
 @group(0) @binding(5) var<storage> trigs_p1 : array<TrigP1>;
 @group(0) @binding(6) var<storage> trig_function_values : array<f32>;
+@group(0) @binding(7) var<storage> seg_function_values : array<f32>;
 
 struct VertexOutput1d {
   @builtin(position) fragPosition: vec4<f32>,
@@ -63,9 +63,21 @@ fn getColor(value: f32) -> vec4<f32> {
 }
 
 @vertex
-fn mainVertexTrigP1(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) trigId: u32) -> VertexOutput2d {
-    let v_offset = 3 * (3 * trigId + vertexId) + VALUES_OFFSET;
+fn mainVertexEdgeP1(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) edgeId: u32) -> VertexOutput1d {
+    let edge = edges_p1[edgeId];
+    var p: vec3<f32> = vec3<f32>(edge.p[3 * vertexId], edge.p[3 * vertexId + 1], edge.p[3 * vertexId + 2]);
 
+    var lam: f32 = 0.0;
+    if vertexId == 0 {
+        lam = 1.0;
+    }
+
+    var position = calcPosition(p);
+    return VertexOutput1d(position, p, lam, edgeId);
+}
+
+@vertex
+fn mainVertexTrigP1(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) trigId: u32) -> VertexOutput2d {
     let trig = trigs_p1[trigId];
     var p = vec3<f32>(trig.p[3 * vertexId], trig.p[3 * vertexId + 1], trig.p[3 * vertexId + 2]);
 

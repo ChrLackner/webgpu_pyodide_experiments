@@ -83,26 +83,26 @@ class MeshRenderObject:
         )
         self._create_pipeline_layout()
         shader_module = self.gpu.device.createShaderModule(to_js({"code": shader_code}))
-        # edges_pipeline = self.gpu.device.createRenderPipeline(
-        #     to_js(
-        #         {
-        #             "layout": self._pipeline_layout,
-        #             "vertex": {
-        #                 "module": shader_module,
-        #                 "entryPoint": "mainVertexEdge",
-        #             },
-        #             "fragment": {
-        #                 "module": shader_module,
-        #                 "entryPoint": "mainFragmentEdge",
-        #                 "targets": [{"format": self.gpu.format}],
-        #             },
-        #             "primitive": {"topology": "line-list"},
-        #             "depthStencil": {
-        #                 **self.gpu.depth_stencil,
-        #             },
-        #         }
-        #     )
-        # )
+        edges_pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "layout": self._pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexEdgeP1",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentEdge",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {"topology": "line-list"},
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                    },
+                }
+            )
+        )
 
         trigs_pipeline = self.gpu.device.createRenderPipeline(
             to_js(
@@ -133,14 +133,14 @@ class MeshRenderObject:
         )
 
         self.pipelines = {
-            # "edges": edges_pipeline,
+            "edges": edges_pipeline,
             "trigs": trigs_pipeline,
         }
 
     def render(self, encoder):
-        # encoder.setPipeline(self.pipelines["edges"])
-        # encoder.setBindGroup(0, self._bind_group)
-        # encoder.draw(2, self.n_edges, 0, 0)
+        encoder.setPipeline(self.pipelines["edges"])
+        encoder.setBindGroup(0, self._bind_group)
+        encoder.draw(2, 3 * self.n_trigs, 0, 0)
 
         encoder.setPipeline(self.pipelines["trigs"])
         encoder.setBindGroup(0, self._bind_group)
@@ -183,6 +183,22 @@ def create_mesh_buffers(device, region, curve_order=1):
 
     n_trigs = len(mesh.ngmesh.Elements2D())
 
+    edge_points = points[2:].reshape(-1, 3, 3)
+    edges = np.zeros((n_trigs, 3, 2, 3), dtype=np.float32)
+    for i in range(3):
+        edges[:, i, 0, :] = edge_points[:, i, :]
+        edges[:, i, 1, :] = edge_points[:, (i + 1) % 3, :]
+    edge_data = js.Uint8Array.new(edges.flatten().tobytes())
+    edge_buffer = device.createBuffer(
+        to_js(
+            {
+                "size": edge_data.length,
+                "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
+            }
+        )
+    )
+    device.queue.writeBuffer(edge_buffer, 0, edge_data)
+
     trigs = np.zeros(
         n_trigs,
         dtype=[
@@ -194,7 +210,7 @@ def create_mesh_buffers(device, region, curve_order=1):
     trigs["index"] = [1] * n_trigs
     data = js.Uint8Array.new(trigs.tobytes())
 
-    buffer = device.createBuffer(
+    trigs_buffer = device.createBuffer(
         to_js(
             {
                 "size": data.length,
@@ -202,8 +218,8 @@ def create_mesh_buffers(device, region, curve_order=1):
             }
         )
     )
-    device.queue.writeBuffer(buffer, 0, data)
-    return {"trigs": buffer}
+    device.queue.writeBuffer(trigs_buffer, 0, data)
+    return {"trigs": trigs_buffer, "edges": edge_buffer}
 
 
 def create_function_value_buffers(device, cf, region, order):
