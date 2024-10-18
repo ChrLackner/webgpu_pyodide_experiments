@@ -1,6 +1,8 @@
 """Main file for the webgpu example, creates a small 2d mesh and renders it using WebGPU"""
 
 import js
+import ngsolve as ngs
+from netgen.occ import unit_square
 from pyodide.ffi import create_proxy
 
 from .gpu import init_webgpu
@@ -15,10 +17,16 @@ async def main():
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    from netgen.occ import unit_square
-
-    mesh = unit_square.GenerateMesh(maxh=0.3)
-    mesh_object = MeshRenderObject(mesh, gpu)
+    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=.1))
+    order = 6
+    gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
+    # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))
+    N =10 
+    gfu.Interpolate(ngs.sin(N*ngs.y)* ngs.sin(N*ngs.x))
+    # gfu.Set(0.5*(ngs.x**order + ngs.y**order))
+    # gfu.Set(ngs.y)
+    mesh_object = MeshRenderObject(gpu)
+    mesh_object.fill_buffers(gfu, order=order)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:

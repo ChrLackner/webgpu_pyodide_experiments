@@ -3,6 +3,7 @@ let pyodide = null;
 const files = [
   "__init__.py",
   "colormap.py",
+  "eval.wgsl",
   "gpu.py",
   "input_handler.py",
   "main.py",
@@ -43,7 +44,7 @@ async function main() {
   pyodide.setDebug(true);
   console.log("loaded pyodide", performance.now());
   console.log(pyodide);
-  await pyodide.loadPackage(["netgen"]);
+  await pyodide.loadPackage(["netgen", "ngsolve", "packaging", "numpy"]);
   console.log("loaded netgen", performance.now());
 
   try {

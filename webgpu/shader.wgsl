@@ -1,7 +1,8 @@
 struct Edge { v: vec2<u32> };
 
 struct Segment { v: vec2<u32>, index: i32 };
-struct Trig { v: vec3<u32>, index: i32 };
+struct TrigP1 { p: array<f32, 9>, index: i32 }; // 3 vertices with 3 coordinates each, don't use vec3 due to 16 byte alignment
+struct TrigP2 { p: array<f32, 18>, index: i32 };
 
 struct Uniforms {
   mat: mat4x4<f32>,
@@ -14,13 +15,14 @@ struct Uniforms {
   padding: u32,
 };
 
+const VALUES_OFFSET: u32 = 2; // storing number of components and order of basis functions in first two entries
+
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
 @group(0) @binding(1) var colormap : texture_1d<f32>;
 @group(0) @binding(2) var colormap_sampler : sampler;
 
-@group(0) @binding(3) var<storage> vertices : array<vec3<f32>>;
-@group(0) @binding(4) var<storage> edges : array<Edge>;
-@group(0) @binding(5) var<storage> trigs : array<Trig>;
+// @group(0) @binding(4) var<storage> edges : array<Edge>;
+@group(0) @binding(5) var<storage> trigs_p1 : array<TrigP1>;
 @group(0) @binding(6) var<storage> trig_function_values : array<f32>;
 
 struct VertexOutput1d {
@@ -61,41 +63,29 @@ fn getColor(value: f32) -> vec4<f32> {
 }
 
 @vertex
-fn mainVertexTrig(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) trigId: u32) -> VertexOutput2d {
-    var trig = trigs[trigId];
-    var vid: u32 = trig.v[vertexId];
-    var p = vertices[vid];
-    var position = calcPosition(p);
+fn mainVertexTrigP1(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) trigId: u32) -> VertexOutput2d {
+    let v_offset = 3 * (3 * trigId + vertexId) + VALUES_OFFSET;
+
+    let trig = trigs_p1[trigId];
+    var p = vec3<f32>(trig.p[3 * vertexId], trig.p[3 * vertexId + 1], trig.p[3 * vertexId + 2]);
+
     var lam: vec2<f32> = vec2<f32>(0.);
     if vertexId < 2 {
         lam[vertexId] = 1.0;
     }
-    return VertexOutput2d(position, p, lam, trigId);
-}
 
-@vertex
-fn mainVertexEdge(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) edgeId: u32) -> VertexOutput1d {
-    var edge = edges[edgeId];
-    var vid: u32 = edge.v[vertexId];
-    var p = vertices[vid];
     var position = calcPosition(p);
-    var lam: f32 = 0.;
-    if vertexId == 0 {
-        lam = 1.0;
-    }
-    return VertexOutput1d(position, p, lam, edgeId);
+
+    return VertexOutput2d(position, p, lam, trigId);
 }
 
 @fragment
 fn mainFragmentTrig(@location(0) p: vec3<f32>, @location(1) lam: vec2<f32>, @location(2) id: u32) -> @location(0) vec4<f32> {
-    let verts = trigs[id].v;
-    let v0 = trig_function_values[ 3 * id ];
-    let v1 = trig_function_values[ 3 * id + 1];
-    let v2 = trig_function_values[ 3 * id + 2];
-
+    // return vec4<f32>(lam, 1.0-lam.x-lam.y, 1.0);
     checkClipping(p);
 
-    let value = evalTrigP1(array(v0, v1, v2), lam);
+    let value = evalTrig(id, 0u, lam);
+    // let value = 0.1;
     return getColor(value);
 }
 
@@ -109,45 +99,10 @@ fn evalSegP1(values: array<f32, 2>, lam: f32) -> f32 {
     return mix(values[0], values[1], lam);
 }
 
-fn evalTrigP1(values: array<f32, 3>, lam: vec2<f32>) -> f32 {
-    return values[0] * lam.x + values[1] * lam.y + values[2] * (1.0 - lam.x - lam.y);
+fn evalTrigP1(offset: u32, stride: u32, lam: vec2<f32>) -> f32 {
+    return trig_function_values[offset] * lam.x + trig_function_values[offset + stride] * lam.y + trig_function_values[offset + 2 * stride] * (1.0 - lam.x - lam.y);
 }
 
 fn evalTetP1(values: array<f32, 4>, lam: vec3<f32>) -> f32 {
     return values[0] * lam.x + values[1] * lam.y + values[2] * lam.z + values[3] * (1.0 - lam.x - lam.y - lam.z);
 }
-
-////////////////////////////////////////////////////////////////////////////////////////
-// Generated code
-
-fn evalSegP2Basis(x: f32) -> array<f32, 3> {
-    let y = 1.0 - x;
-    return array(x * x, 2.0 * x * y, y * y);
-}
-
-fn evalSegP2(v: array<f32, 3>, lam: f32) -> f32 {
-    let basis = evalSegP2Basis(lam);
-    var result: f32 = basis[0] * v[0];
-    for (var i: u32 = 1; i < 3; i++) {
-        result += basis[i] * v[i];
-    }
-    return result;
-}
-
-fn evalTrigP2Basis(lam: vec2<f32>) -> array<f32, 6> {
-    let x = lam.x;
-    let y = lam.y;
-    let z = 1.0 - x - y;
-    let x0 = 2.0 * x;
-    return array(x * x, x0 * y, y * y, x0 * z, 2.0 * y * z, z * z);
-}
-
-fn evalTrigP2(v: array<f32, 6>, lam: vec2<f32>) -> f32 {
-    let basis = evalTrigP2Basis(lam);
-    var result: f32 = basis[0] * v[0];
-    for (var i: u32 = 1; i < 6; i++) {
-        result += basis[i] * v[i];
-    }
-    return result;
-}
-
