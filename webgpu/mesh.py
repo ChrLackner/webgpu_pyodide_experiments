@@ -15,7 +15,7 @@ class MeshRenderObject:
     def __init__(self, gpu):
         self.gpu = gpu
 
-    def draw(self, cf, region, order=1):
+    def draw1(self, cf, region, order=1):
         """Draw the coefficient function on a region"""
         self.n_trigs = len(region.mesh.ngmesh.Elements2D())
         device = self.gpu.device
@@ -23,6 +23,174 @@ class MeshRenderObject:
         buffers = create_mesh_buffers(device, region, curve_order=1)
         buffers.update(create_function_value_buffers(device, cf, region, order))
         self._buffers = buffers
+
+        self._create_bind_group()
+        self._create_pipelines()
+
+    def draw2(self, N):
+        x_range = np.linspace(0, 1, N, dtype=np.float32)
+        y_range = np.linspace(0, 1, N, dtype=np.float32)
+
+        xx, yy = np.meshgrid(x_range, y_range)
+        zz = np.zeros_like(xx)
+        points = np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T
+
+        # top_left = np.arange((N - 1) * (N - 1)).reshape((N - 1, N - 1))
+        # bottom_left = top_left + N
+        # top_right = top_left + 1
+        # bottom_right = bottom_left + 1
+        indices = np.arange(N * N).reshape(N, N)
+
+        top_left = indices[:-1, :-1].ravel()
+        top_right = indices[:-1, 1:].ravel()
+        bottom_left = indices[1:, :-1].ravel()
+        bottom_right = indices[1:, 1:].ravel()
+
+        tri1 = np.vstack(
+            [top_left.ravel(), bottom_left.ravel(), bottom_right.ravel()]
+        ).T
+        tri2 = np.vstack([top_left.ravel(), bottom_right.ravel(), top_right.ravel()]).T
+        all_triangles = np.vstack([tri1, tri2])
+        # all_triangles = tri1
+
+        n_trigs = all_triangles.shape[0]
+        self.n_trigs = n_trigs
+
+        p_trigs = points[all_triangles]
+
+        trigs = np.zeros(
+            n_trigs,
+            dtype=[
+                ("p", np.float32, 9),  # 3 vec3<f32> (each 4 floats due to padding)
+                ("index", np.int32),  # index (i32)
+            ],
+        )
+        trigs["p"] = p_trigs.reshape(-1, 9)
+        trigs["index"] = [1] * n_trigs
+        data = js.Uint8Array.new(trigs.tobytes())
+
+        trigs_buffer = self.gpu.device.createBuffer(
+            to_js(
+                {
+                    "size": data.length,
+                    "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
+                }
+            )
+        )
+        self.gpu.device.queue.writeBuffer(trigs_buffer, 0, data)
+
+        function_buffer = self.gpu.device.createBuffer(
+            to_js(
+                {
+                    "size": 4 * (3 * self.n_trigs + 2),
+                    "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
+                }
+            )
+        )
+        data = js.Uint8Array.new(
+            np.concatenate(
+                (
+                    np.array([1, 1], dtype=np.float32),
+                    np.linspace(0, 1, 3 * self.n_trigs, dtype=np.float32),
+                )
+            ).tobytes()
+        )
+        self.gpu.device.queue.writeBuffer(function_buffer, 0, data)
+        self._buffers = {"trigs": trigs_buffer, "trig_function_values": function_buffer}
+        print("n_trigs", self.n_trigs)
+
+        self._create_bind_group()
+        self._create_pipelines()
+
+    def create_testing_square_mesh(self, n):
+        # launch compute shader
+        n = math.ceil(n / 32) * 32
+        n_trigs = n * n
+        self.n_trigs = n_trigs
+        print(f"n_trigs {n_trigs/10**6:.3f}, M")
+        trig_size = 4 * n_trigs * 9
+        value_size = 4 * (3 * n_trigs + 2)
+        print(f"trig size {trig_size/1024/1024:.2f} MB")
+        print(f"vals size {value_size/1024/1024:.2f} MB")
+        trigs_buffer = self.gpu.device.createBuffer(
+            to_js(
+                {
+                    "size": 4 * n_trigs * 10,
+                    "usage": js.GPUBufferUsage.STORAGE,
+                }
+            )
+        )
+        function_buffer = self.gpu.device.createBuffer(
+            to_js(
+                {
+                    "size": 4 * (3 * n_trigs + 2),
+                    "usage": js.GPUBufferUsage.STORAGE,
+                }
+            )
+        )
+        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
+            to_js(
+                {
+                    "entries": [
+                        {
+                            "binding": 5,
+                            "visibility": js.GPUShaderStage.COMPUTE,
+                            "buffer": {"type": "storage"},
+                        },
+                        {
+                            "binding": 6,
+                            "visibility": js.GPUShaderStage.COMPUTE,
+                            "buffer": {"type": "storage"},
+                        },
+                    ]
+                }
+            )
+        )
+        self._bind_group = self.gpu.device.createBindGroup(
+            to_js(
+                {
+                    "layout": self._bind_group_layout,
+                    "entries": [
+                        {
+                            "binding": 5,
+                            "resource": {"buffer": trigs_buffer},
+                        },
+                        {
+                            "binding": 6,
+                            "resource": {"buffer": function_buffer},
+                        },
+                    ],
+                }
+            )
+        )
+
+        device = self.gpu.device
+        shader_code = open("webgpu/compute.wgsl").read()
+        shader_module = device.createShaderModule(to_js({"code": shader_code}))
+        pipeline = device.createComputePipeline(
+            to_js(
+                {
+                    "layout": device.createPipelineLayout(
+                        to_js({"bindGroupLayouts": [self._bind_group_layout]})
+                    ),
+                    "compute": {"module": shader_module, "entryPoint": "create_mesh"},
+                }
+            )
+        )
+
+        command_encoder = device.createCommandEncoder()
+        pass_encoder = command_encoder.beginComputePass()
+        pass_encoder.setPipeline(pipeline)
+        pass_encoder.setBindGroup(0, self._bind_group)
+
+        pass_encoder.dispatchWorkgroups(n // 32, 1, 1)
+        pass_encoder.end()
+        device.queue.submit([command_encoder.finish()])
+
+        self._buffers = {
+            "trigs": trigs_buffer,
+            "trig_function_values": function_buffer,
+        }
 
         self._create_bind_group()
         self._create_pipelines()
@@ -83,26 +251,26 @@ class MeshRenderObject:
         )
         self._create_pipeline_layout()
         shader_module = self.gpu.device.createShaderModule(to_js({"code": shader_code}))
-        edges_pipeline = self.gpu.device.createRenderPipeline(
-            to_js(
-                {
-                    "layout": self._pipeline_layout,
-                    "vertex": {
-                        "module": shader_module,
-                        "entryPoint": "mainVertexEdgeP1",
-                    },
-                    "fragment": {
-                        "module": shader_module,
-                        "entryPoint": "mainFragmentEdge",
-                        "targets": [{"format": self.gpu.format}],
-                    },
-                    "primitive": {"topology": "line-list"},
-                    "depthStencil": {
-                        **self.gpu.depth_stencil,
-                    },
-                }
-            )
-        )
+        # edges_pipeline = self.gpu.device.createRenderPipeline(
+        #     to_js(
+        #         {
+        #             "layout": self._pipeline_layout,
+        #             "vertex": {
+        #                 "module": shader_module,
+        #                 "entryPoint": "mainVertexEdgeP1",
+        #             },
+        #             "fragment": {
+        #                 "module": shader_module,
+        #                 "entryPoint": "mainFragmentEdge",
+        #                 "targets": [{"format": self.gpu.format}],
+        #             },
+        #             "primitive": {"topology": "line-list"},
+        #             "depthStencil": {
+        #                 **self.gpu.depth_stencil,
+        #             },
+        #         }
+        #     )
+        # )
 
         trigs_pipeline = self.gpu.device.createRenderPipeline(
             to_js(
@@ -133,15 +301,15 @@ class MeshRenderObject:
         )
 
         self.pipelines = {
-            "edges": edges_pipeline,
+            # "edges": edges_pipeline,
             "trigs": trigs_pipeline,
         }
 
     def render(self, encoder):
-        encoder.setPipeline(self.pipelines["edges"])
-        encoder.setBindGroup(0, self._bind_group)
-        encoder.draw(2, 3 * self.n_trigs, 0, 0)
-
+        # encoder.setPipeline(self.pipelines["edges"])
+        # encoder.setBindGroup(0, self._bind_group)
+        # encoder.draw(2, 3 * self.n_trigs, 0, 0)
+        #
         encoder.setPipeline(self.pipelines["trigs"])
         encoder.setBindGroup(0, self._bind_group)
         encoder.draw(3, self.n_trigs, 0, 0)
@@ -269,4 +437,5 @@ def evaluate_cf(cf, region, order):
         values[:, :, i] = ibmat * ngsmat
 
     values = values.transpose((1, 0, 2)).flatten()
-    return np.concatenate(([np.float32(cf.dim), np.float32(order)], values))
+    ret = np.concatenate(([np.float32(cf.dim), np.float32(order)], values))
+    return ret

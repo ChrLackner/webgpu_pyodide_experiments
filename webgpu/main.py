@@ -1,7 +1,9 @@
 """Main file for the webgpu example, creates a small 2d mesh and renders it using WebGPU"""
 
+import urllib.parse
 import js
 import ngsolve as ngs
+import ngsolve.meshes as ngs_meshes
 from netgen.occ import unit_square
 from pyodide.ffi import create_proxy
 
@@ -17,16 +19,26 @@ async def main():
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
-    order = 6
-    gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
-    # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))
-    N = 10
-    gfu.Interpolate(ngs.sin(N * ngs.y) * ngs.sin(N * ngs.x))
-    # gfu.Set(0.5*(ngs.x**order + ngs.y**order))
-    # gfu.Set(ngs.y)
+    query = urllib.parse.parse_qs(js.location.search[1:])
+    N = int(query.get("n", [1000])[0])
+    print("creating ", N * N, "triangles")
+
+    # mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
+    # print("loading mesh...", flush=True)
+    # mesh = ngs.Mesh("webgpu/square5.vol")
+    # order = 3
+    # gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
+    # # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))
+    # N = 10
+    # print(js.performance.now(), "set gf...", mesh.ne, flush=True)
+    # # gfu.vec[:] = 0.5
+    # # gfu.Interpolate(ngs.sin(N * ngs.y) * ngs.sin(N * ngs.x))
+    # # gfu.Set(0.5*(ngs.x**order + ngs.y**order))
+    # # gfu.Set(ngs.y)
     mesh_object = MeshRenderObject(gpu)
-    mesh_object.draw(gfu, mesh.Region(ngs.VOL), order=order)
+    # mesh_object.draw(ngs.x, mesh.Region(ngs.VOL), order=order)
+    # mesh_object.draw(800)
+    mesh_object.create_testing_square_mesh(N)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:
@@ -38,7 +50,20 @@ async def main():
     gpu.uniforms.mat[12] = -0.5 * 1.8
     gpu.uniforms.mat[13] = -0.5 * 1.8
 
+    t_last = 0
+    fps = 0
+    frame_counter = 0
+
     def render(time):
+        nonlocal t_last, fps, frame_counter
+        dt = time - t_last
+        if dt > 1e-3:
+            frame_counter += 1
+            fps = 0.5 * fps + 0.5 * 1000 / dt
+            t_last = time
+            if frame_counter % 30 == 0:
+                print(f"fps {fps:.2f}")
+
         # this is the render function, it's called for every frame
 
         # copy camera position etc. to GPU
@@ -51,6 +76,7 @@ async def main():
         render_pass_encoder.end()
 
         gpu.device.queue.submit([command_encoder.finish()])
+        js.requestAnimationFrame(render_function)
 
     render_function = create_proxy(render)
     gpu.input_handler.render_function = render_function
@@ -95,7 +121,7 @@ def reload_package(package_name):
     return reloaded_modules
 
 
-async def reload():
+async def reload(*args, **kwargs):
     print("reload")
     cleanup()
     reload_package("webgpu")
