@@ -35,8 +35,6 @@ async def init_webgpu(canvas):
                 "requiredLimits": {
                     "maxBufferSize": one_gig,
                     "maxStorageBufferBindingSize": one_gig,
-                    "maxUniformBufferBindingSize": one_gig,
-                    "maxComputeWorkgroupSizeZ": 64,
                 },
             }
         )
