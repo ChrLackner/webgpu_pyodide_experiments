@@ -1,10 +1,12 @@
-import js
 import sys
 
+import js
+
 from .colormap import Colormap
+from .input_handler import InputHandler
 from .uniforms import Uniforms
 from .utils import to_js
-from .input_handler import InputHandler
+
 
 async def init_webgpu(canvas):
     """Initialize WebGPU, create device and canvas"""
@@ -21,6 +23,7 @@ async def init_webgpu(canvas):
     device = await adapter.requestDevice()
 
     return WebGPU(device, canvas)
+
 
 class WebGPU:
     """WebGPU management class, handles "global" state, like device, canvas, frame/depth buffer, colormap and uniforms"""
@@ -61,7 +64,6 @@ class WebGPU:
             )
         )
         self.input_handler = InputHandler(canvas, self.uniforms)
-
 
     def begin_render_pass(self, command_encoder):
         render_pass_encoder = command_encoder.beginRenderPass(

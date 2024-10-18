@@ -17,16 +17,16 @@ async def main():
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=.1))
+    mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.1))
     order = 6
     gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
     # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))
-    N =10 
-    gfu.Interpolate(ngs.sin(N*ngs.y)* ngs.sin(N*ngs.x))
+    N = 10
+    gfu.Interpolate(ngs.sin(N * ngs.y) * ngs.sin(N * ngs.x))
     # gfu.Set(0.5*(ngs.x**order + ngs.y**order))
     # gfu.Set(ngs.y)
     mesh_object = MeshRenderObject(gpu)
-    mesh_object.fill_buffers(gfu, order=order)
+    mesh_object.draw(gfu, mesh.Region(ngs.VOL), order=order)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:
@@ -47,7 +47,7 @@ async def main():
         command_encoder = gpu.device.createCommandEncoder()
 
         render_pass_encoder = gpu.begin_render_pass(command_encoder)
-        mesh_object.draw(render_pass_encoder)
+        mesh_object.render(render_pass_encoder)
         render_pass_encoder.end()
 
         gpu.device.queue.submit([command_encoder.finish()])
