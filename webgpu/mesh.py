@@ -10,12 +10,13 @@ from .utils import to_js
 
 
 class MeshRenderObject:
-    """Class that creates and manages all webgpu data structures to render a Netgen mesh"""
+    """Class that creates and manages all webgpu data structures to render an NGSolve mesh with a coefficient function"""
 
     def __init__(self, gpu):
         self.gpu = gpu
 
     def draw(self, cf, region, order=1):
+        """Draw the coefficient function on a region"""
         self.n_trigs = len(region.mesh.ngmesh.Elements2D())
         device = self.gpu.device
 
@@ -176,6 +177,7 @@ def create_mesh_buffers(device, region, curve_order=1):
     # TODO: implement other element types than triangles
     # TODO: handle region correctly to draw only part of the mesh
     # TODO: handle 3d meshes correctly
+    # TODO: set up proper index buffer
     mesh = region.mesh
     points = evaluate_cf(ngs.CF((ngs.x, ngs.y, ngs.z)), mesh.Region(ngs.VOL), order=1)
 
@@ -205,6 +207,8 @@ def create_mesh_buffers(device, region, curve_order=1):
 
 
 def create_function_value_buffers(device, cf, region, order):
+    """Evaluate a coefficient function on a mesh and create GPU buffer with the values,
+    returns a dictionary with the buffer as value and the name/element type as key"""
     # TODO: implement other element types than triangles
     values = evaluate_cf(cf, region, order)
     data = js.Uint8Array.new(values.tobytes())
