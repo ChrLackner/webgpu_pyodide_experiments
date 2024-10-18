@@ -81,11 +81,8 @@ fn mainVertexTrigP1(@builtin(vertex_index) vertexId: u32, @builtin(instance_inde
 
 @fragment
 fn mainFragmentTrig(@location(0) p: vec3<f32>, @location(1) lam: vec2<f32>, @location(2) id: u32) -> @location(0) vec4<f32> {
-    // return vec4<f32>(lam, 1.0-lam.x-lam.y, 1.0);
     checkClipping(p);
-
     let value = evalTrig(id, 0u, lam);
-    // let value = 0.1;
     return getColor(value);
 }
 
@@ -95,14 +92,3 @@ fn mainFragmentEdge(@location(0) p: vec3<f32>) -> @location(0) vec4<f32> {
     return vec4<f32>(0, 0, 0, 1.0);
 }
 
-fn evalSegP1(values: array<f32, 2>, lam: f32) -> f32 {
-    return mix(values[0], values[1], lam);
-}
-
-fn evalTrigP1(offset: u32, stride: u32, lam: vec2<f32>) -> f32 {
-    return trig_function_values[offset] * lam.x + trig_function_values[offset + stride] * lam.y + trig_function_values[offset + 2 * stride] * (1.0 - lam.x - lam.y);
-}
-
-fn evalTetP1(values: array<f32, 4>, lam: vec3<f32>) -> f32 {
-    return values[0] * lam.x + values[1] * lam.y + values[2] * lam.z + values[3] * (1.0 - lam.x - lam.y - lam.z);
-}

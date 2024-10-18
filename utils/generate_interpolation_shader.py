@@ -256,12 +256,12 @@ def GenerateInterpolationFunction(et, orders, scal_dims):
         print(ndof + basis_code.count("*"), "multiplications")
         print(ndof + basis_code.count("+"), "additions")
 
-        def code_get_vec(dim, offset="i*stride"):
+        def code_get_vec(dim, i=0):
             if dim == 1:
-                return f"{eltype.lower()}_function_values[offset+{offset}]"
+                return f"{eltype.lower()}_function_values[offset+{i}*stride]"
             code = f"vec{dim}<f32>("
             for i in range(dim):
-                code += f"{eltype.lower()}_function_values[offset+{offset}+{i}]"
+                code += f"{eltype.lower()}_function_values[offset+{i}*stride]"
                 if i < dim - 1:
                     code += ", "
             code += ")"
@@ -278,12 +278,9 @@ def GenerateInterpolationFunction(et, orders, scal_dims):
 
             code += f"fn eval{eltype}P{p}{suffix}(offset: u32, stride: u32, lam: {lam_type}) -> {scal} {{\n"
             code += f"    let basis = eval{eltype}P{p}Basis(lam);\n"
-            code += (
-                f"    var result: {scal} = basis[0] * {code_get_vec(scal_dim, '0')};\n"
-            )
-            code += f"    for (var i: u32 = 1; i < {ndof}; i++) {{\n"
-            code += f"        result += basis[i] * {code_get_vec(scal_dim)};\n"
-            code += f"    }}\n"
+            code += f"    var result: {scal} = basis[0] * {code_get_vec(scal_dim)};\n"
+            for i in range(1, ndof):
+                code += f"    result += basis[{i}] * {code_get_vec(scal_dim, i)};\n"
             code += f"    return result;\n"
             code += f"}}\n\n"
         result += code
@@ -307,6 +304,6 @@ def GenerateInterpolationFunction(et, orders, scal_dims):
 
 code = ""
 for et in [ET.SEGM, ET.TRIG, ET.TET][1:2]:
-    code += GenerateInterpolationFunction(et, orders=range(2, 7), scal_dims=range(1, 2))
+    code += GenerateInterpolationFunction(et, orders=range(1, 7), scal_dims=range(1, 2))
 
 open("../webgpu/eval.wgsl", "w").write(code)
