@@ -3,6 +3,7 @@ let pyodide = null;
 const files = [
   "__init__.py",
   "colormap.py",
+  "compute.wgsl",
   "eval.wgsl",
   "gpu.py",
   "input_handler.py",
