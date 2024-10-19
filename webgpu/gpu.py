@@ -39,7 +39,8 @@ async def init_webgpu(canvas):
             }
         )
     )
-    js.console.log(device.limits)
+    js.console.log("device limits\n", device.limits)
+    js.console.log("adapter info\n", adapter.info)
 
     print(
         "max storage buffer binding size",
