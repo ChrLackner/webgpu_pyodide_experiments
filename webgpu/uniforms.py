@@ -2,7 +2,7 @@ import ctypes as ct
 
 import js
 
-from .utils import to_js
+from .utils import UniformBinding, to_js
 
 
 # These values must match the numbers defined in the shader
@@ -10,10 +10,13 @@ class Binding:
     UNIFORMS = 0
     COLORMAP_TEXTURE = 1
     COLORMAP_SAMPLER = 2
-    VERTICES = 3
+
     EDGES = 4
     TRIGS = 5
     TRIG_FUNCTION_VALUES = 6
+    VERTICES = 8
+    INDEX = 9
+    GBUFFERLAM = 10
 
 
 class ClippingPlaneUniform(ct.Structure):
@@ -74,17 +77,8 @@ class Uniforms(ct.Structure):
             )
         )
 
-    def get_binding_layout(self):
-        return [
-            {
-                "binding": Binding.UNIFORMS,
-                "visibility": js.GPUShaderStage.FRAGMENT | js.GPUShaderStage.VERTEX,
-                "buffer": {"type": "uniform"},
-            }
-        ]
-
-    def get_binding(self):
-        return [{"binding": Binding.UNIFORMS, "resource": {"buffer": self.buffer}}]
+    def get_bindings(self):
+        return [UniformBinding(Binding.UNIFORMS, self.buffer)]
 
     def update_buffer(self):
         """Copy the current data to the GPU buffer"""

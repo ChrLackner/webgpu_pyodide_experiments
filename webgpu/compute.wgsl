@@ -1,6 +1,8 @@
-struct TrigP1 { p: array<f32, 9>, index: i32 };
+struct TrigP1 { p: array<f32, 9>, index: i32};
 @group(0) @binding(5) var<storage, read_write> trigs_p1 : array<TrigP1>;
 @group(0) @binding(6) var<storage, read_write> trig_function_values : array<f32>;
+@group(0) @binding(8) var<storage, read_write> vertex_buffer : array<f32>;
+@group(0) @binding(9) var<storage, read_write> index_buffer : array<u32>;
 
 @compute  @workgroup_size(16, 16, 1)
 fn create_mesh(@builtin(num_workgroups) n_groups: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
@@ -12,27 +14,52 @@ fn create_mesh(@builtin(num_workgroups) n_groups: vec3<u32>, @builtin(workgroup_
         trig_function_values[1] = 1.0;
     }
 
-    for (var ix: u32 = wid.x * 16u + lid.x; ix < n; ix += 16u * n_groups.x) {
-        let x: f32 = h * f32(ix);
-        for (var iy: u32 = wid.y * 16u + lid.y; iy < n; iy += 16u) {
-            let y: f32 = h * f32(iy);
-            let i = ix + iy * n;
-            trigs_p1[i].p[0] = x;
-            trigs_p1[i].p[1] = y;
-            trigs_p1[i].p[2] = 0.0;
+    let ix: u32 = wid.x * 16u + lid.x;
+    let x: f32 = h * f32(ix);
+    for (var iy: u32 = wid.y * 16u + lid.y; iy < n + 1; iy += 16u) {
+        let y: f32 = h * f32(iy);
+        for (var k: u32 = 0u; k < 2u; k++) {
+            if iy < n {
+                let i = 2 * (ix + iy * n) + k;
+                let i1 = ix + iy * (n + 1);
+                var px: array<f32, 3>;
+                var py: array<f32, 3>;
+                if k == 0 {
+                    px = array<f32, 3>(x, x + h, x);
+                    py = array<f32, 3>(y, y, y + h);
+                } else {
+                    px = array<f32, 3>(x + h, x + h, x);
+                    py = array<f32, 3>(y, y + h, y + h);
+                }
+                trigs_p1[i].index = 1;
+                for (var pi: u32 = 0u; pi < 3u; pi++) {
+                    trigs_p1[i].p[3 * pi + 0] = px[pi];
+                    trigs_p1[i].p[3 * pi + 1] = py[pi];
+                    trigs_p1[i].p[3 * pi + 2] = 0.0;
+                    trig_function_values[2 + 3 * i + pi] = px[pi];
+                }
 
-            trigs_p1[i].p[3] = x + h;
-            trigs_p1[i].p[4] = y;
-            trigs_p1[i].p[5] = 0.0;
+                if k == 0 {
+                    index_buffer[3 * i] = i1;
+                    index_buffer[3 * i + 1] = i1 + 1;
+                    index_buffer[3 * i + 2] = i1 + n + 1;
+                } else {
+                    index_buffer[3 * i] = i1 + 1;
+                    index_buffer[3 * i + 1] = i1 + n + 1 + 1;
+                    index_buffer[3 * i + 2] = i1 + n + 1;
+                }
+            }
+        }
 
-            trigs_p1[i].p[6] = x;
-            trigs_p1[i].p[7] = y + h;
-            trigs_p1[i].p[8] = 0.0;
+        let iv = 3 * (ix + iy * (n + 1));
+        vertex_buffer[iv] = x;
+        vertex_buffer[iv + 1] = y;
+        vertex_buffer[iv + 2] = 0.0;
 
-
-            trig_function_values[2 + 3 * i + 0] = x;
-            trig_function_values[2 + 3 * i + 1] = x + h;
-            trig_function_values[2 + 3 * i + 2] = x;
+        if ix + 1 == n {
+            vertex_buffer[iv + 3] = x + h;
+            vertex_buffer[iv + 4] = y;
+            vertex_buffer[iv + 5] = 0.;
         }
     }
 }

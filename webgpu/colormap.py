@@ -1,7 +1,7 @@
 import js
 
 from .uniforms import Binding
-from .utils import to_js
+from .utils import SamplerBinding, TextureBinding, to_js
 
 
 class Colormap:
@@ -48,7 +48,7 @@ class Colormap:
             )
         )
 
-    def get_binding_layout(self):
+    def get_binding_layout(self, pipeline):
         FRAGMENT = js.GPUShaderStage.FRAGMENT
         return [
             {
@@ -67,14 +67,18 @@ class Colormap:
             },
         ]
 
-    def get_binding(self):
+    def get_bindings(self):
         return [
-            {
-                "binding": Binding.COLORMAP_TEXTURE,
-                "resource": self.texture.createView(),
-            },
-            {"binding": Binding.COLORMAP_SAMPLER, "resource": self.sampler},
+            TextureBinding(Binding.COLORMAP_TEXTURE, self.texture),
+            SamplerBinding(Binding.COLORMAP_SAMPLER, self.sampler),
         ]
+        # return [
+        #     {
+        #         "binding": Binding.COLORMAP_TEXTURE,
+        #         "resource": self.texture.createView(),
+        #     },
+        #     {"binding": Binding.COLORMAP_SAMPLER, "resource": self.sampler},
+        # ]
 
     def __del__(self):
         self.texture.destroy()

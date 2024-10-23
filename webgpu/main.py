@@ -1,14 +1,14 @@
 """Main file for the webgpu example, creates a small 2d mesh and renders it using WebGPU"""
 
 import urllib.parse
+
 import js
 import ngsolve as ngs
-import ngsolve.meshes as ngs_meshes
 from netgen.occ import unit_square
-from pyodide.ffi import create_proxy
+from pyodide.ffi import create_proxy, create_once_callable
 
 from .gpu import init_webgpu
-from .mesh import MeshRenderObject
+from .mesh import *
 
 gpu = None
 mesh_object = None
@@ -19,26 +19,32 @@ async def main():
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    query = urllib.parse.parse_qs(js.location.search[1:])
-    N = int(query.get("n", [1000])[0])
-    print("creating ", N * N, "triangles")
+    if 0:
+        # create new ngsolve mesh and evaluate arbitrary function on it
+        mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
+        order = 6
+        region = mesh.Region(ngs.VOL)
+        cf = ngs.sin(10 * ngs.x) * ngs.sin(10 * ngs.y)
+        n_trigs, buffers = create_mesh_buffers(gpu.device, region)
+        buffers = buffers | create_function_value_buffers(gpu.device, cf, region, order)
+        mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
 
-    # mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
-    # print("loading mesh...", flush=True)
-    # mesh = ngs.Mesh("webgpu/square5.vol")
-    # order = 3
-    # gfu = ngs.GridFunction(ngs.H1(mesh, order=order))
-    # # gfu.Set(ngs.IfPos(ngs.x-0.8, 1, 0))
-    # N = 10
-    # print(js.performance.now(), "set gf...", mesh.ne, flush=True)
-    # # gfu.vec[:] = 0.5
-    # # gfu.Interpolate(ngs.sin(N * ngs.y) * ngs.sin(N * ngs.x))
-    # # gfu.Set(0.5*(ngs.x**order + ngs.y**order))
-    # # gfu.Set(ngs.y)
-    mesh_object = MeshRenderObject(gpu)
-    # mesh_object.draw(ngs.x, mesh.Region(ngs.VOL), order=order)
-    # mesh_object.draw(800)
-    mesh_object.create_testing_square_mesh(N)
+    else:
+        # create testing mesh, this one also supports indexed or deferred rendering
+        # but has always P1 and 'x' hard-coded as function
+        query = urllib.parse.parse_qs(js.location.search[1:])
+        N = 100
+        # N = int(5000/2**.5)
+        # N = int(2000 / 2**0.5)
+        # N = int(50/2**.5)
+        # N = 1
+        N = int(query.get("n", [N])[0])
+        # print("creating ", N * N, "triangles")
+        n_trigs, buffers = create_testing_square_mesh(gpu, N)
+
+        # mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
+        # mesh_object = MeshRenderObjectIndexed(gpu, buffers, n_trigs)
+        mesh_object = MeshRenderObjectDeferred(gpu, buffers, n_trigs)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:
@@ -57,12 +63,17 @@ async def main():
     def render(time):
         nonlocal t_last, fps, frame_counter
         dt = time - t_last
-        if dt > 1e-3:
-            frame_counter += 1
-            fps = 0.5 * fps + 0.5 * 1000 / dt
-            t_last = time
-            if frame_counter % 30 == 0:
-                print(f"fps {fps:.2f}")
+        t_last = time
+        frame_counter += 1
+        # if dt < 20:
+        #     print('returning')
+        #     return
+        print(f"frame time {dt:.2f} ms")
+        # if dt > 1e-3:
+        #     frame_counter += 1
+        #     fps = 0.9 * fps + 0.1 * 1000 / dt
+        #     if frame_counter % 30 == 0:
+        #         print(f"fps {fps:.2f}")
 
         # this is the render function, it's called for every frame
 
@@ -71,17 +82,21 @@ async def main():
 
         command_encoder = gpu.device.createCommandEncoder()
 
-        render_pass_encoder = gpu.begin_render_pass(command_encoder)
-        mesh_object.render(render_pass_encoder)
-        render_pass_encoder.end()
+        mesh_object.render(command_encoder)
 
         gpu.device.queue.submit([command_encoder.finish()])
-        js.requestAnimationFrame(render_function)
+        if frame_counter < 20:
+            # js.requestAnimationFrame(render_function)
+            gpu.device.queue.onSubmittedWorkDone().then(
+                create_once_callable(
+                    lambda _: js.requestAnimationFrame(render_function)
+                )
+            )
 
     render_function = create_proxy(render)
     gpu.input_handler.render_function = render_function
 
-    js.requestAnimationFrame(render_function)
+    render_function.request_id = js.requestAnimationFrame(render_function)
 
 
 def cleanup():

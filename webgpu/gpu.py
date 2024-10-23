@@ -26,6 +26,11 @@ async def init_webgpu(canvas):
         js.alert("WebGPU is not supported")
         sys.exit(1)
 
+    required_features = []
+    if adapter.features.has("timestamp-query"):
+        print("have timestamp query")
+        required_features.append("timestamp-query")
+
     one_meg = 1024**2
     one_gig = 1024**3
     device = await adapter.requestDevice(
@@ -33,9 +38,10 @@ async def init_webgpu(canvas):
             {
                 "powerPreference": "high-performance",
                 "requiredLimits": {
-                    "maxBufferSize": one_gig,
-                    "maxStorageBufferBindingSize": one_gig,
+                    "maxBufferSize": one_gig - 16,
+                    "maxStorageBufferBindingSize": one_gig - 16,
                 },
+                "requiredFeatures": required_features,
             }
         )
     )

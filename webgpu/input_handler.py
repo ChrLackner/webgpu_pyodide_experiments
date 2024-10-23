@@ -24,8 +24,8 @@ class InputHandler:
         if self._is_moving:
             self.uniforms.mat[12] += ev.movementX / self.canvas.width * 1.8
             self.uniforms.mat[13] -= ev.movementY / self.canvas.height * 1.8
-            # if self.render_function:
-            #     js.requestAnimationFrame(self.render_function)
+            if self.render_function:
+                js.requestAnimationFrame(self.render_function)
 
     def unregister_callbacks(self):
         for event in self._callbacks:

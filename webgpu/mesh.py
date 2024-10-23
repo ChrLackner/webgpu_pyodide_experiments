@@ -6,276 +6,41 @@ import ngsolve.webgui
 import numpy as np
 
 from .uniforms import Binding
-from .utils import to_js
+from .utils import BufferBinding, Device, ShaderStage, TextureBinding, to_js
 
 
 class MeshRenderObject:
-    """Class that creates and manages all webgpu data structures to render an NGSolve mesh with a coefficient function"""
-
-    def __init__(self, gpu):
-        self.gpu = gpu
-
-    def draw1(self, cf, region, order=1):
-        """Draw the coefficient function on a region"""
-        self.n_trigs = len(region.mesh.ngmesh.Elements2D())
-        device = self.gpu.device
-
-        buffers = create_mesh_buffers(device, region, curve_order=1)
-        buffers.update(create_function_value_buffers(device, cf, region, order))
+    def __init__(self, gpu, buffers, n_trigs):
         self._buffers = buffers
-
-        self._create_bind_group()
-        self._create_pipelines()
-
-    def draw2(self, N):
-        x_range = np.linspace(0, 1, N, dtype=np.float32)
-        y_range = np.linspace(0, 1, N, dtype=np.float32)
-
-        xx, yy = np.meshgrid(x_range, y_range)
-        zz = np.zeros_like(xx)
-        points = np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T
-
-        # top_left = np.arange((N - 1) * (N - 1)).reshape((N - 1, N - 1))
-        # bottom_left = top_left + N
-        # top_right = top_left + 1
-        # bottom_right = bottom_left + 1
-        indices = np.arange(N * N).reshape(N, N)
-
-        top_left = indices[:-1, :-1].ravel()
-        top_right = indices[:-1, 1:].ravel()
-        bottom_left = indices[1:, :-1].ravel()
-        bottom_right = indices[1:, 1:].ravel()
-
-        tri1 = np.vstack(
-            [top_left.ravel(), bottom_left.ravel(), bottom_right.ravel()]
-        ).T
-        tri2 = np.vstack([top_left.ravel(), bottom_right.ravel(), top_right.ravel()]).T
-        all_triangles = np.vstack([tri1, tri2])
-        # all_triangles = tri1
-
-        n_trigs = all_triangles.shape[0]
+        self.gpu = gpu
+        self.device = Device(gpu.device)
         self.n_trigs = n_trigs
 
-        p_trigs = points[all_triangles]
+        self._create_pipeline()
 
-        trigs = np.zeros(
-            n_trigs,
-            dtype=[
-                ("p", np.float32, 9),  # 3 vec3<f32> (each 4 floats due to padding)
-                ("index", np.int32),  # index (i32)
-            ],
+    def get_bindings(self):
+        return [
+            *self.gpu.uniforms.get_bindings(),
+            *self.gpu.colormap.get_bindings(),
+            BufferBinding(Binding.TRIGS, self._buffers["trigs"]),
+            BufferBinding(
+                Binding.TRIG_FUNCTION_VALUES, self._buffers["trig_function_values"]
+            ),
+        ]
+
+    def _create_pipeline(self):
+        bind_layout, self._bind_group = self.device.create_bind_group(
+            self.get_bindings(), "MeshRenderObject"
         )
-        trigs["p"] = p_trigs.reshape(-1, 9)
-        trigs["index"] = [1] * n_trigs
-        data = js.Uint8Array.new(trigs.tobytes())
-
-        trigs_buffer = self.gpu.device.createBuffer(
+        pipeline_layout = self.device.create_pipeline_layout(bind_layout)
+        shader_module = self.device.compile_files(
+            "webgpu/shader.wgsl", "webgpu/eval.wgsl"
+        )
+        self._pipeline = self.gpu.device.createRenderPipeline(
             to_js(
                 {
-                    "size": data.length,
-                    "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
-                }
-            )
-        )
-        self.gpu.device.queue.writeBuffer(trigs_buffer, 0, data)
-
-        function_buffer = self.gpu.device.createBuffer(
-            to_js(
-                {
-                    "size": 4 * (3 * self.n_trigs + 2),
-                    "usage": js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST,
-                }
-            )
-        )
-        data = js.Uint8Array.new(
-            np.concatenate(
-                (
-                    np.array([1, 1], dtype=np.float32),
-                    np.linspace(0, 1, 3 * self.n_trigs, dtype=np.float32),
-                )
-            ).tobytes()
-        )
-        self.gpu.device.queue.writeBuffer(function_buffer, 0, data)
-        self._buffers = {"trigs": trigs_buffer, "trig_function_values": function_buffer}
-        print("n_trigs", self.n_trigs)
-
-        self._create_bind_group()
-        self._create_pipelines()
-
-    def create_testing_square_mesh(self, n):
-        # launch compute shader
-        n = math.ceil(n / 32) * 32
-        n_trigs = n * n
-        self.n_trigs = n_trigs
-        print(f"n_trigs {n_trigs/10**6:.3f}, M")
-        trig_size = 4 * n_trigs * 9
-        value_size = 4 * (3 * n_trigs + 2)
-        print(f"trig size {trig_size/1024/1024:.2f} MB")
-        print(f"vals size {value_size/1024/1024:.2f} MB")
-        trigs_buffer = self.gpu.device.createBuffer(
-            to_js(
-                {
-                    "size": 4 * n_trigs * 10,
-                    "usage": js.GPUBufferUsage.STORAGE,
-                }
-            )
-        )
-        function_buffer = self.gpu.device.createBuffer(
-            to_js(
-                {
-                    "size": 4 * (3 * n_trigs + 2),
-                    "usage": js.GPUBufferUsage.STORAGE,
-                }
-            )
-        )
-        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
-            to_js(
-                {
-                    "entries": [
-                        {
-                            "binding": 5,
-                            "visibility": js.GPUShaderStage.COMPUTE,
-                            "buffer": {"type": "storage"},
-                        },
-                        {
-                            "binding": 6,
-                            "visibility": js.GPUShaderStage.COMPUTE,
-                            "buffer": {"type": "storage"},
-                        },
-                    ]
-                }
-            )
-        )
-        self._bind_group = self.gpu.device.createBindGroup(
-            to_js(
-                {
-                    "layout": self._bind_group_layout,
-                    "entries": [
-                        {
-                            "binding": 5,
-                            "resource": {"buffer": trigs_buffer},
-                        },
-                        {
-                            "binding": 6,
-                            "resource": {"buffer": function_buffer},
-                        },
-                    ],
-                }
-            )
-        )
-
-        device = self.gpu.device
-        shader_code = open("webgpu/compute.wgsl").read()
-        shader_module = device.createShaderModule(to_js({"code": shader_code}))
-        pipeline = device.createComputePipeline(
-            to_js(
-                {
-                    "layout": device.createPipelineLayout(
-                        to_js({"bindGroupLayouts": [self._bind_group_layout]})
-                    ),
-                    "compute": {"module": shader_module, "entryPoint": "create_mesh"},
-                }
-            )
-        )
-
-        command_encoder = device.createCommandEncoder()
-        pass_encoder = command_encoder.beginComputePass()
-        pass_encoder.setPipeline(pipeline)
-        pass_encoder.setBindGroup(0, self._bind_group)
-
-        pass_encoder.dispatchWorkgroups(n // 32, 1, 1)
-        pass_encoder.end()
-        device.queue.submit([command_encoder.finish()])
-
-        self._buffers = {
-            "trigs": trigs_buffer,
-            "trig_function_values": function_buffer,
-        }
-
-        self._create_bind_group()
-        self._create_pipelines()
-
-    def get_binding_layout(self):
-        layouts = []
-        for name in self._buffers.keys():
-            binding = getattr(Binding, name.upper())
-            layouts.append(
-                {
-                    "binding": binding,
-                    "visibility": js.GPUShaderStage.FRAGMENT | js.GPUShaderStage.VERTEX,
-                    "buffer": {"type": "read-only-storage"},
-                }
-            )
-        return layouts
-
-    def get_binding(self):
-        resources = []
-        for name in self._buffers.keys():
-            binding = getattr(Binding, name.upper())
-            resources.append(
-                {"binding": binding, "resource": {"buffer": self._buffers[name]}}
-            )
-        return resources
-
-    def _create_bind_group(self):
-        """Get binding data from WebGPU class and add values used for mesh rendering"""
-        layouts = []
-        resources = []
-
-        # gather binding layouts and resources from all objects
-        for obj in [self.gpu.uniforms, self.gpu.colormap, self]:
-            layouts += obj.get_binding_layout()
-            resources += obj.get_binding()
-
-        self._bind_group_layout = self.gpu.device.createBindGroupLayout(
-            to_js({"entries": layouts})
-        )
-
-        self._bind_group = self.gpu.device.createBindGroup(
-            to_js(
-                {
-                    "layout": self._bind_group_layout,
-                    "entries": resources,
-                }
-            )
-        )
-
-    def _create_pipeline_layout(self):
-        self._pipeline_layout = self.gpu.device.createPipelineLayout(
-            to_js({"bindGroupLayouts": [self._bind_group_layout]})
-        )
-
-    def _create_pipelines(self):
-        shader_code = (
-            open("webgpu/shader.wgsl").read() + open("webgpu/eval.wgsl").read()
-        )
-        self._create_pipeline_layout()
-        shader_module = self.gpu.device.createShaderModule(to_js({"code": shader_code}))
-        # edges_pipeline = self.gpu.device.createRenderPipeline(
-        #     to_js(
-        #         {
-        #             "layout": self._pipeline_layout,
-        #             "vertex": {
-        #                 "module": shader_module,
-        #                 "entryPoint": "mainVertexEdgeP1",
-        #             },
-        #             "fragment": {
-        #                 "module": shader_module,
-        #                 "entryPoint": "mainFragmentEdge",
-        #                 "targets": [{"format": self.gpu.format}],
-        #             },
-        #             "primitive": {"topology": "line-list"},
-        #             "depthStencil": {
-        #                 **self.gpu.depth_stencil,
-        #             },
-        #         }
-        #     )
-        # )
-
-        trigs_pipeline = self.gpu.device.createRenderPipeline(
-            to_js(
-                {
-                    "layout": self._pipeline_layout,
+                    "label": "MeshRenderObject",
+                    "layout": pipeline_layout,
                     "vertex": {
                         "module": shader_module,
                         "entryPoint": "mainVertexTrigP1",
@@ -300,23 +65,248 @@ class MeshRenderObject:
             )
         )
 
-        self.pipelines = {
-            # "edges": edges_pipeline,
-            "trigs": trigs_pipeline,
-        }
+    def render(self, encoder):
+        render_pass = self.gpu.begin_render_pass(encoder)
+        render_pass.setBindGroup(0, self._bind_group)
+        render_pass.setPipeline(self._pipeline)
+        render_pass.draw(3, self.n_trigs, 0, 0)
+        render_pass.end()
+
+
+class MeshRenderObjectIndexed:
+    def __init__(self, gpu, buffers, n_trigs):
+        self._buffers = buffers
+        self.gpu = gpu
+        self.device = Device(gpu.device)
+        self.n_trigs = n_trigs
+
+        self._create_pipeline()
+
+    def get_bindings(self):
+        return [
+            *self.gpu.uniforms.get_bindings(),
+            *self.gpu.colormap.get_bindings(),
+            BufferBinding(
+                Binding.TRIG_FUNCTION_VALUES, self._buffers["trig_function_values"]
+            ),
+            BufferBinding(Binding.VERTICES, self._buffers["vertices"]),
+            BufferBinding(Binding.INDEX, self._buffers["index"]),
+        ]
+
+    def _create_pipeline(self):
+        bind_layout, self._bind_group = self.device.create_bind_group(
+            self.get_bindings(), "MeshRenderObject"
+        )
+        pipeline_layout = self.device.create_pipeline_layout(bind_layout)
+        shader_module = self.device.compile_files(
+            "webgpu/shader.wgsl", "webgpu/eval.wgsl"
+        )
+        self._pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "label": "MeshRenderObjectIndexed",
+                    "layout": pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexTrigP1Indexed",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentTrig",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {
+                        "topology": "triangle-list",
+                        "cullMode": "none",
+                        "frontFace": "ccw",
+                    },
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                        # shift trigs behind to ensure that edges are rendered properly
+                        "depthBias": 1.0,
+                        "depthBiasSlopeScale": 1,
+                    },
+                }
+            )
+        )
 
     def render(self, encoder):
-        # encoder.setPipeline(self.pipelines["edges"])
-        # encoder.setBindGroup(0, self._bind_group)
-        # encoder.draw(2, 3 * self.n_trigs, 0, 0)
-        #
-        encoder.setPipeline(self.pipelines["trigs"])
-        encoder.setBindGroup(0, self._bind_group)
-        encoder.draw(3, self.n_trigs, 0, 0)
+        render_pass = self.gpu.begin_render_pass(encoder)
+        render_pass.setBindGroup(0, self._bind_group)
+        render_pass.setPipeline(self._pipeline)
+        render_pass.draw(3, self.n_trigs)
+        render_pass.end()
 
-    def __del__(self):
-        for buffer in self._buffers.values():
-            buffer.destroy()
+
+class MeshRenderObjectDeferred:
+    def __init__(self, gpu, buffers, n_trigs):
+        self._buffers = buffers
+        self.gpu = gpu
+        self.device = Device(gpu.device)
+        self.n_trigs = n_trigs
+        self._g_buffer_format = "rgba32float"
+
+        # texture to store g-buffer (trig index and barycentric coordinates)
+        self._g_buffer = gpu.device.createTexture(
+            to_js(
+                {
+                    "label": "gBufferLam",
+                    "size": [self.gpu.canvas.width, self.gpu.canvas.height],
+                    "usage": js.GPUTextureUsage.RENDER_ATTACHMENT
+                    | js.GPUTextureUsage.TEXTURE_BINDING,
+                    "format": self._g_buffer_format,
+                }
+            )
+        )
+
+        self._create_pipelines()
+
+    def get_bindings_pass1(self):
+        return [
+            *self.gpu.uniforms.get_bindings(),
+            *self.gpu.colormap.get_bindings(),
+            BufferBinding(
+                Binding.TRIG_FUNCTION_VALUES, self._buffers["trig_function_values"]
+            ),
+            BufferBinding(Binding.VERTICES, self._buffers["vertices"]),
+            BufferBinding(Binding.INDEX, self._buffers["index"]),
+        ]
+
+    def get_bindings_pass2(self):
+        return [
+            *self.get_bindings_pass1(),
+            TextureBinding(
+                Binding.GBUFFERLAM,
+                self._g_buffer,
+                sample_type="unfilterable-float",
+                dim=2,
+            ),
+        ]
+
+    def _create_pipelines(self):
+        bind_layout_pass1, self._bind_group_pass1 = self.device.create_bind_group(
+            self.get_bindings_pass1(), "MeshRenderObjectDeferredPass1"
+        )
+        pipeline_layout_pass1 = self.device.create_pipeline_layout(bind_layout_pass1)
+        shader_module = self.device.compile_files(
+            "webgpu/shader.wgsl", "webgpu/eval.wgsl"
+        )
+        self._pipeline_pass1 = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "label": "MeshRenderObjectDeferredPass1",
+                    "layout": pipeline_layout_pass1,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexTrigP1Indexed",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentTrigToGBuffer",
+                        "targets": [{"format": self._g_buffer_format}],
+                    },
+                    "targets": [{"format": self._g_buffer_format}],
+                    "primitive": {
+                        "topology": "triangle-list",
+                        "cullMode": "none",
+                        "frontFace": "ccw",
+                    },
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                        # shift trigs behind to ensure that edges are rendered properly
+                        "depthBias": 1.0,
+                        "depthBiasSlopeScale": 1,
+                    },
+                }
+            )
+        )
+
+        bind_layout_pass2, self._bind_group_pass2 = self.device.create_bind_group(
+            self.get_bindings_pass2(),
+            "mesh_object_deferred_pass2",
+        )
+
+        deferred_pipeline_layout = self.device.create_pipeline_layout(bind_layout_pass2)
+
+        self._pipeline_pass2 = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "label": "trigs_deferred",
+                    "layout": deferred_pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexDeferred",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentDeferred",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {
+                        "topology": "triangle-strip",
+                        "cullMode": "none",
+                        "frontFace": "ccw",
+                    },
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                        # shift trigs behind to ensure that edges are rendered properly
+                        "depthBias": 1.0,
+                        "depthBiasSlopeScale": 1,
+                    },
+                }
+            )
+        )
+
+    def render(self, encoder):
+        pass1_options = {
+            "colorAttachments": [
+                {
+                    "view": self._g_buffer.createView(),
+                    "clearValue": {"r": 0, "g": -1, "b": -1, "a": -1},
+                    "loadOp": "clear",
+                    "storeOp": "store",
+                }
+            ],
+            "depthStencilAttachment": {
+                "view": self.gpu.depth_texture.createView(
+                    to_js({"format": self.gpu.depth_format, "aspect": "all"})
+                ),
+                "depthLoadOp": "clear",
+                "depthStoreOp": "store",
+                "depthClearValue": 1.0,
+            },
+        }
+        pass1 = encoder.beginRenderPass(to_js(pass1_options))
+        pass1.setViewport(0, 0, self.gpu.canvas.width, self.gpu.canvas.height, 0.0, 1.0)
+        pass1.setBindGroup(0, self._bind_group_pass1)
+        pass1.setPipeline(self._pipeline_pass1)
+        pass1.draw(3, self.n_trigs)
+        pass1.end()
+
+        pass2_options = {
+            "colorAttachments": [
+                {
+                    "view": self.gpu.context.getCurrentTexture().createView(),
+                    "clearValue": {"r": 1, "g": 1, "b": 1, "a": 1},
+                    "loadOp": "clear",
+                    "storeOp": "store",
+                }
+            ],
+            "depthStencilAttachment": {
+                "view": self.gpu.depth_texture.createView(
+                    to_js({"format": self.gpu.depth_format, "aspect": "all"})
+                ),
+                "depthLoadOp": "clear",
+                "depthStoreOp": "store",
+                "depthClearValue": 1.0,
+            },
+        }
+        pass2 = encoder.beginRenderPass(to_js(pass2_options))
+        pass2.setBindGroup(0, self._bind_group_pass2)
+        pass2.setViewport(0, 0, self.gpu.canvas.width, self.gpu.canvas.height, 0.0, 1.0)
+        pass2.setPipeline(self._pipeline_pass2)
+        pass2.draw(4)
+        pass2.end()
 
 
 def _get_bernstein_matrix_trig(n, intrule):
@@ -387,7 +377,7 @@ def create_mesh_buffers(device, region, curve_order=1):
         )
     )
     device.queue.writeBuffer(trigs_buffer, 0, data)
-    return {"trigs": trigs_buffer, "edges": edge_buffer}
+    return n_trigs, {"trigs": trigs_buffer, "edges": edge_buffer}
 
 
 def create_function_value_buffers(device, cf, region, order):
@@ -439,3 +429,70 @@ def evaluate_cf(cf, region, order):
     values = values.transpose((1, 0, 2)).flatten()
     ret = np.concatenate(([np.float32(cf.dim), np.float32(order)], values))
     return ret
+
+
+def create_testing_square_mesh(gpu, n):
+    device = Device(gpu.device)
+    # launch compute shader
+    n = math.ceil(n / 16) * 16
+    n_trigs = 2 * n * n
+    if n_trigs >= 1e5:
+        print(f"Creating {n_trigs//1000} K trigs")
+    else:
+        print(f"Creating {n_trigs} trigs")
+    trig_size = 4 * n_trigs * 10
+    value_size = 4 * (3 * n_trigs + 2)
+    index_size = 4 * (3 * n_trigs)
+    vertex_size = 4 * 3 * (n + 1) * (n + 1)
+    print(f"trig size {trig_size/1024/1024:.2f} MB")
+    print(f"vals size {value_size/1024/1024:.2f} MB")
+    print(f"index size {index_size/1024/1024:.2f} MB")
+    print(f"vertex size {index_size/1024/1024:.2f} MB")
+    trigs_buffer = device.create_buffer(trig_size)
+    function_buffer = device.create_buffer(value_size)
+    index_buffer = device.create_buffer(index_size)
+    vertex_buffer = device.create_buffer(vertex_size)
+
+    buffers = {
+        "trigs": trigs_buffer,
+        "trig_function_values": function_buffer,
+        "vertices": vertex_buffer,
+        "index": index_buffer,
+    }
+
+    shader_module = device.compile_files("webgpu/compute.wgsl")
+
+    bindings = []
+    for name in ["trigs", "trig_function_values", "vertices", "index"]:
+        binding = getattr(Binding, name.upper())
+        bindings.append(
+            BufferBinding(
+                binding,
+                buffers[name],
+                read_only=False,
+                visibility=ShaderStage.COMPUTE,
+            )
+        )
+
+    layout, group = device.create_bind_group(bindings, "create_test_mesh")
+
+    pipeline = gpu.device.createComputePipeline(
+        to_js(
+            {
+                "label": "create_test_mesh",
+                "layout": device.create_pipeline_layout(layout, "create_test_mesh"),
+                "compute": {"module": shader_module, "entryPoint": "create_mesh"},
+            }
+        )
+    )
+
+    command_encoder = gpu.device.createCommandEncoder()
+    pass_encoder = command_encoder.beginComputePass()
+    pass_encoder.setPipeline(pipeline)
+    pass_encoder.setBindGroup(0, group)
+
+    pass_encoder.dispatchWorkgroups(n // 16, 1, 1)
+    pass_encoder.end()
+    gpu.device.queue.submit([command_encoder.finish()])
+
+    return n_trigs, buffers
