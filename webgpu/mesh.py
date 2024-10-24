@@ -10,6 +10,8 @@ from .utils import BufferBinding, Device, ShaderStage, TextureBinding, to_js
 
 
 class MeshRenderObject:
+    """Use "trigs" and "trig_function_values" buffers to render a function on a mesh"""
+
     def __init__(self, gpu, buffers, n_trigs):
         self._buffers = buffers
         self.gpu = gpu
@@ -74,6 +76,8 @@ class MeshRenderObject:
 
 
 class MeshRenderObjectIndexed:
+    """Use "vertices", "index" and "trig_function_values" buffers to render a mesh"""
+
     def __init__(self, gpu, buffers, n_trigs):
         self._buffers = buffers
         self.gpu = gpu
@@ -139,6 +143,14 @@ class MeshRenderObjectIndexed:
 
 
 class MeshRenderObjectDeferred:
+    """Use "vertices", "index" and "trig_function_values" buffers to render a mesh in two render passes
+    The first pass renders the trig indices and barycentric coordinates to a g-buffer texture.
+    The second pass renders the trigs using the g-buffer texture to evaluate the function value in each pixel of the frame buffer.
+
+    This approach is especialy more efficient if function evaluation is expensive (high order) and many triangles overlap,
+    because the function values are only evaluated for the pixels that are visible.
+    """
+
     def __init__(self, gpu, buffers, n_trigs):
         self._buffers = buffers
         self.gpu = gpu

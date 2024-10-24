@@ -48,37 +48,11 @@ class Colormap:
             )
         )
 
-    def get_binding_layout(self, pipeline):
-        FRAGMENT = js.GPUShaderStage.FRAGMENT
-        return [
-            {
-                "binding": Binding.COLORMAP_TEXTURE,
-                "visibility": FRAGMENT,
-                "texture": {
-                    "sampleType": "float",
-                    "viewDimension": "1d",
-                    "multisamples": False,
-                },
-            },
-            {
-                "binding": Binding.COLORMAP_SAMPLER,
-                "visibility": FRAGMENT,
-                "sampler": {"type": "filtering"},
-            },
-        ]
-
     def get_bindings(self):
         return [
             TextureBinding(Binding.COLORMAP_TEXTURE, self.texture),
             SamplerBinding(Binding.COLORMAP_SAMPLER, self.sampler),
         ]
-        # return [
-        #     {
-        #         "binding": Binding.COLORMAP_TEXTURE,
-        #         "resource": self.texture.createView(),
-        #     },
-        #     {"binding": Binding.COLORMAP_SAMPLER, "resource": self.sampler},
-        # ]
 
     def __del__(self):
         self.texture.destroy()
