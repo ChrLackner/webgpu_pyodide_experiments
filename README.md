@@ -17,5 +17,5 @@ tar xvf ngsolve_pyodide_0.26.2.tar.bz2
 
 ## Running the server
 
-Run `python dev.py` and open `http://localhost:8000/dev.html`. Everytime you change some code, the website is automatically hot-reloaded (pyodide stays alive) and `webgpu.py` reloaded and executed.
-For the hot-reload feature you need to have 'websockets' and 'watchdog' installed
+Run `python dev.py` and open `http://localhost:8000/index.html`. Everytime you change some code, the website is automatically hot-reloaded (pyodide stays alive) and the `webgpu` package is reloaded and executed.
+For the hot-reload feature you need to have the python packages `websockets` and `watchdog` installed
