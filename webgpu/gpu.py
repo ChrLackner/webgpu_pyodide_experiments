@@ -66,6 +66,8 @@ class WebGPU:
         self.format = js.navigator.gpu.getPreferredCanvasFormat()
         self.canvas = canvas
 
+        print("canvas", canvas.width, canvas.height, canvas)
+
         self.uniforms = Uniforms(device)
 
         self.context = canvas.getContext("webgpu")

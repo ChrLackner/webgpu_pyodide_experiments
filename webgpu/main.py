@@ -5,7 +5,7 @@ import urllib.parse
 import js
 import ngsolve as ngs
 from netgen.occ import unit_square
-from pyodide.ffi import create_proxy, create_once_callable
+from pyodide.ffi import create_once_callable, create_proxy
 
 from .gpu import init_webgpu
 from .mesh import *
@@ -13,18 +13,21 @@ from .mesh import *
 gpu = None
 mesh_object = None
 
+cf = None
+render_function = None
+
 
 async def main():
-    global gpu, mesh_object
+    global gpu, mesh_object, cf, render_function
 
     gpu = await init_webgpu(js.document.getElementById("canvas"))
 
-    if 0:
+    if 1:
         # create new ngsolve mesh and evaluate arbitrary function on it
         mesh = ngs.Mesh(unit_square.GenerateMesh(maxh=0.5))
         order = 6
         region = mesh.Region(ngs.VOL)
-        cf = ngs.sin(10 * ngs.x) * ngs.sin(10 * ngs.y)
+        cf = cf or ngs.sin(10 * ngs.x) * ngs.sin(10 * ngs.y)
         n_trigs, buffers = create_mesh_buffers(gpu.device, region)
         buffers = buffers | create_function_value_buffers(gpu.device, cf, region, order)
         mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
@@ -42,9 +45,9 @@ async def main():
         # print("creating ", N * N, "triangles")
         n_trigs, buffers = create_testing_square_mesh(gpu, N)
 
-        # mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
+        mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
         # mesh_object = MeshRenderObjectIndexed(gpu, buffers, n_trigs)
-        mesh_object = MeshRenderObjectDeferred(gpu, buffers, n_trigs)
+        # mesh_object = MeshRenderObjectDeferred(gpu, buffers, n_trigs)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:
@@ -86,12 +89,12 @@ async def main():
 
         gpu.device.queue.submit([command_encoder.finish()])
         if frame_counter < 20:
-            # js.requestAnimationFrame(render_function)
-            gpu.device.queue.onSubmittedWorkDone().then(
-                create_once_callable(
-                    lambda _: js.requestAnimationFrame(render_function)
-                )
-            )
+            js.requestAnimationFrame(render_function)
+            # gpu.device.queue.onSubmittedWorkDone().then(
+            #     create_once_callable(
+            #         lambda _: js.requestAnimationFrame(render_function)
+            #     )
+            # )
 
     render_function = create_proxy(render)
     gpu.input_handler.render_function = render_function
@@ -134,6 +137,18 @@ def reload_package(package_name):
 
     reload_recursive(package)
     return reloaded_modules
+
+
+async def user_function(data):
+    code, expr = data
+    import base64
+    import marshal
+    import types
+
+    code = base64.b64decode(code.encode("utf-8"))
+    code = marshal.loads(code)
+    func = types.FunctionType(code, globals(), "user_function")
+    func(expr)
 
 
 async def reload(*args, **kwargs):
