@@ -64,7 +64,8 @@ fn checkClipping(p: vec3<f32>) {
 }
 
 fn getColor(value: f32) -> vec4<f32> {
-    return textureSample(colormap, colormap_sampler, value);
+    let v = (value - uniforms.colormap.x) / uniforms.colormap.y;
+    return textureSample(colormap, colormap_sampler, v);
 }
 
 @vertex

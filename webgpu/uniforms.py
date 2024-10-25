@@ -53,7 +53,7 @@ class Uniforms(ct.Structure):
         self.clipping_plane.normal[2] = 0
         self.clipping_plane.dist = 1
         self.colormap.min = 0.0
-        self.colormap.max = 0.0
+        self.colormap.max = 1.0
         self.scaling.im = 0.0
         self.scaling.re = 0.0
         self.aspect = 0.0
