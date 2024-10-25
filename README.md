@@ -13,9 +13,17 @@ To get started, download and extract the required NGSolve Pyodide package:
 ```bash
 wget https://ngsolve.org/files/ngsolve_pyodide_0.26.2.tar.bz2
 tar xvf ngsolve_pyodide_0.26.2.tar.bz2
+python3 -m pip install -e .
 ```
 
 ## Running the server
 
 Run `python dev.py` and open `http://localhost:8000/index.html`. Everytime you change some code, the website is automatically hot-reloaded (pyodide stays alive) and the `webgpu` package is reloaded and executed.
 For the hot-reload feature you need to have the python packages `websockets` and `watchdog` installed
+
+## Jupyter notebook
+
+```
+jupyter notebook webgpu.ipynb
+```
+
