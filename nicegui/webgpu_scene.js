@@ -49,6 +49,13 @@ export default {
       );
       await user_function(data);
     },
+      async draw(data) {
+          const func_name = data['run_function'];
+        const draw_mesh = pyodide.runPython(
+            `import webgpu.pyodide_code; webgpu.pyodide_code.draw_mesh`,
+        );
+        await draw_mesh('canvas', data);
+    },
   },
 
   props: {
@@ -74,6 +81,7 @@ const files = [
   "shader.wgsl",
   "uniforms.py",
   "utils.py",
+  "pyodide_code.py",
 ];
 
 async function reload() {
@@ -112,11 +120,7 @@ async function main() {
     "ngsolve",
     "packaging",
     "numpy",
-    "micropip",
   ]);
-  await pyodide.runPythonAsync(
-    "import micropip; await micropip.install('dill');",
-  );
   console.log("loaded netgen", performance.now());
 
   //try {

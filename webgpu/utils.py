@@ -128,8 +128,10 @@ class Device:
             to_js({"label": label, "bindGroupLayouts": [binding_layout]})
         )
 
-    def create_buffer(self, size, usage=js.GPUBufferUsage.STORAGE):
-        return self.device.createBuffer(to_js({"size": size, "usage": usage}))
+    def create_buffer(self, data, usage=js.GPUBufferUsage.STORAGE):
+        buf = self.device.createBuffer(to_js({"size": len(data), "usage": usage}))
+        self.device.queue.writeBuffer(buf, 0, data)
+        return buf
 
     def compile_files(self, *files):
         code = ""
