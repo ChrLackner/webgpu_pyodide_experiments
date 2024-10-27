@@ -8,7 +8,66 @@ import numpy as np
 from .uniforms import Binding
 from .utils import BufferBinding, Device, ShaderStage, TextureBinding, to_js
 
-
+class WireFrameRenderer:
+    def __init__(self, gpu, buffers, n_trigs):
+        self._buffers = buffers
+        self.gpu = gpu
+        self.device = Device(gpu.device)
+        self.n_edges = n_trigs * 3
+        self._create_pipeline()
+        
+    def get_bindings(self):
+        return [
+            *self.gpu.uniforms.get_bindings(),
+            BufferBinding(Binding.EDGES, self._buffers["edges"]),
+        ]
+        
+    def _create_pipeline(self):
+        bind_layout, self._bind_group = self.device.create_bind_group(
+            self.get_bindings(), "WireFrameRenderer"
+        )
+        pipeline_layout = self.device.create_pipeline_layout(bind_layout)
+        shader_module = self.device.compile_files(
+            "webgpu/shader.wgsl", "webgpu/eval.wgsl"
+        )
+        depth_stencil = self.gpu.depth_stencil.copy()
+        depth_stencil.update( { "depthWriteEnabled": False } )
+        self._pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "label": "WireFrameRenderer",
+                    "layout": pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexEdgeP1",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentEdge",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {
+                        "topology": "line-list",
+                        "cullMode": "none",
+                        "frontFace": "ccw",
+                    },
+                    "depthStencil": {
+                        **depth_stencil,
+                        "depthBias": -1.0,  # Bring edges slightly forward
+                        "depthBiasSlopeScale": -1,  # Keep edges in front of the triangles
+                    }
+                }
+            )
+        )
+        
+    def render(self, encoder, loadOp="clear"):
+        # loadOp can be "clear" or "load"
+        render_pass = self.gpu.begin_render_pass(encoder, loadOp=loadOp)
+        render_pass.setBindGroup(0, self._bind_group)
+        render_pass.setPipeline(self._pipeline)
+        render_pass.draw(2, self.n_edges, 0, 0)
+        render_pass.end()
+        
 class MeshRenderObject:
     """Use "trigs" and "trig_function_values" buffers to render a function on a mesh"""
 
@@ -17,14 +76,63 @@ class MeshRenderObject:
         self.gpu = gpu
         self.device = Device(gpu.device)
         self.n_trigs = n_trigs
-
         self._create_pipeline()
 
     def get_bindings(self):
         return [
             *self.gpu.uniforms.get_bindings(),
             *self.gpu.colormap.get_bindings(),
+            BufferBinding(Binding.EDGES, self._buffers["edges"]),
             BufferBinding(Binding.TRIGS, self._buffers["trigs"]),
+        ]
+
+    def _create_pipeline(self):
+        bind_layout, self._bind_group = self.device.create_bind_group(
+            self.get_bindings(), "MeshRenderObject"
+        )
+        pipeline_layout = self.device.create_pipeline_layout(bind_layout)
+        shader_module = self.device.compile_files(
+            "webgpu/shader.wgsl", "webgpu/eval.wgsl"
+        )
+        self._pipeline = self.gpu.device.createRenderPipeline(
+            to_js(
+                {
+                    "label": "MeshRenderObject",
+                    "layout": pipeline_layout,
+                    "vertex": {
+                        "module": shader_module,
+                        "entryPoint": "mainVertexTrigP1",
+                    },
+                    "fragment": {
+                        "module": shader_module,
+                        "entryPoint": "mainFragmentTrigMesh",
+                        "targets": [{"format": self.gpu.format}],
+                    },
+                    "primitive": {
+                        "topology": "triangle-list",
+                        "cullMode": "none",
+                        "frontFace": "ccw",
+                    },
+                    "depthStencil": {
+                        **self.gpu.depth_stencil,
+                        # shift trigs behind to ensure that edges are rendered properly
+                        "depthBias": 1.0,
+                        "depthBiasSlopeScale": 1,
+                    },
+                }
+            )
+        )
+
+    def render(self, encoder, loadOp="clear"):
+        render_pass = self.gpu.begin_render_pass(encoder, loadOp=loadOp)
+        render_pass.setBindGroup(0, self._bind_group)
+        render_pass.setPipeline(self._pipeline)
+        render_pass.draw(3, self.n_trigs, 0, 0)
+        render_pass.end()
+
+class CFRenderObject(MeshRenderObject):
+    def get_bindings(self):
+        return super().get_bindings() + [
             BufferBinding(
                 Binding.TRIG_FUNCTION_VALUES, self._buffers["trig_function_values"]
             ),
@@ -66,14 +174,6 @@ class MeshRenderObject:
                 }
             )
         )
-
-    def render(self, encoder):
-        render_pass = self.gpu.begin_render_pass(encoder)
-        render_pass.setBindGroup(0, self._bind_group)
-        render_pass.setPipeline(self._pipeline)
-        render_pass.draw(3, self.n_trigs, 0, 0)
-        render_pass.end()
-
 
 class MeshRenderObjectIndexed:
     """Use "vertices", "index" and "trig_function_values" buffers to render a mesh"""

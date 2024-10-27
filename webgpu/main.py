@@ -30,7 +30,7 @@ async def main():
         cf = cf or ngs.sin(10 * ngs.x) * ngs.sin(10 * ngs.y)
         n_trigs, buffers = create_mesh_buffers(gpu.device, region)
         buffers = buffers | create_function_value_buffers(gpu.device, cf, region, order)
-        mesh_object = MeshRenderObject(gpu, buffers, n_trigs)
+        mesh_object = CFRenderObject(gpu, buffers, n_trigs)
 
     else:
         # create testing mesh, this one also supports indexed or deferred rendering

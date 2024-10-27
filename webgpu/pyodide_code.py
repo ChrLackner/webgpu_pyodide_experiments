@@ -9,6 +9,52 @@ gpu = None
 mesh_object = None
 render_function = None
 
+
+def cleanup():
+    print("cleanup")
+    global gpu, mesh_object
+    if "gpu" in globals():
+        del gpu
+    if "mesh_object" in globals():
+        del mesh_object
+        
+
+def reload_package(package_name):
+    """Reload python package and all submodules (searches in modules for references to other submodules)"""
+    import importlib
+    import os
+    import types
+
+    package = importlib.import_module(package_name)
+    assert hasattr(package, "__package__")
+    file_name = package.__file__
+    package_dir = os.path.dirname(file_name) + os.sep
+    reloaded_modules = {file_name: package}
+
+    def reload_recursive(module):
+        module = importlib.reload(module)
+
+        for var in vars(module).values():
+            if isinstance(var, types.ModuleType):
+                file_name = getattr(var, "__file__", None)
+                if file_name is not None and file_name.startswith(package_dir):
+                    if file_name not in reloaded_modules:
+                        reloaded_modules[file_name] = reload_recursive(var)
+
+        return module
+
+    reload_recursive(package)
+    return reloaded_modules
+
+
+async def reload(*args, **kwargs):
+    print("reload")
+    cleanup()
+    reload_package("webgpu")
+    from webgpu.main import main
+
+    await main()
+
 async def draw_mesh(canvas_name, render_data):
     global gpu, mesh_object, render_function
     print("received data = ", render_data)
@@ -22,6 +68,7 @@ async def draw_mesh(canvas_name, render_data):
     trigs_buffer = device.create_buffer(js.Uint8Array.new(trigs),
                                         js.GPUBufferUsage.STORAGE | js.GPUBufferUsage.COPY_DST)
     mesh_object = MeshRenderObject(gpu, {"edges": edge_buffer, "trigs": trigs_buffer}, render_data.n_trigs)
+    wireframe_object = WireFrameRenderer(gpu, {"edges": edge_buffer, "trigs": trigs_buffer}, render_data.n_trigs)
 
     # move mesh to center and scale it
     for i in [0, 5, 10]:
@@ -49,6 +96,7 @@ async def draw_mesh(canvas_name, render_data):
         command_encoder = gpu.device.createCommandEncoder()
 
         mesh_object.render(command_encoder)
+        wireframe_object.render(command_encoder, loadOp="load")
 
         gpu.device.queue.submit([command_encoder.finish()])
         if frame_counter < 20:

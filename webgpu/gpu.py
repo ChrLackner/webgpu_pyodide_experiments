@@ -99,7 +99,7 @@ class WebGPU:
         )
         self.input_handler = InputHandler(canvas, self.uniforms)
 
-    def begin_render_pass(self, command_encoder):
+    def begin_render_pass(self, command_encoder, loadOp):
         render_pass_encoder = command_encoder.beginRenderPass(
             to_js(
                 {
@@ -107,7 +107,7 @@ class WebGPU:
                         {
                             "view": self.context.getCurrentTexture().createView(),
                             "clearValue": {"r": 1, "g": 1, "b": 1, "a": 1},
-                            "loadOp": "clear",
+                            "loadOp": loadOp,
                             "storeOp": "store",
                         }
                     ],
@@ -115,7 +115,7 @@ class WebGPU:
                         "view": self.depth_texture.createView(
                             to_js({"format": self.depth_format, "aspect": "all"})
                         ),
-                        "depthLoadOp": "clear",
+                        "depthLoadOp": loadOp,
                         "depthStoreOp": "store",
                         "depthClearValue": 1.0,
                     },
