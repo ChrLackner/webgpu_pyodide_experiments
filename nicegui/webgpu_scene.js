@@ -52,7 +52,7 @@ export default {
       async draw(data) {
           const func_name = data['run_function'];
         const draw_mesh = pyodide.runPython(
-            `import webgpu.pyodide_code; webgpu.pyodide_code.draw_mesh`,
+            func_name
         );
         await draw_mesh('canvas', data);
     },

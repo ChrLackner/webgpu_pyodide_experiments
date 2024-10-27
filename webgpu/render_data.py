@@ -26,6 +26,11 @@ def create_mesh_data(mesh):
     trigs["index"] = [1] * n_trigs
     return { "edges" : edge_data, "trigs" : trigs.tobytes(), "n_trigs" : n_trigs }
 
+def create_cf_data(cf, mesh, order):
+    data = create_mesh_data(mesh)
+    data["cf"] = evaluate_cf(cf, mesh.Region(ngs.VOL), order).tobytes()
+    return data
+
 def evaluate_cf(cf, region, order):
     """Evaluate a coefficient function on a mesh and returns the values as a flat array, ready to copy to the GPU as storage buffer.
     The first two entries are the function dimension and the polynomial order of the stored values.

@@ -22,7 +22,6 @@ async def handle_connect(websocket: WebSocketServerProtocol):
         CONNECTIONS.add(websocket)
         async for data in websocket:
             data = json.loads(data)
-            print("handle message", data, type(data))
             if data["type"] in message_handlers:
                 message_handlers[data["type"]](data["data"])
     finally:

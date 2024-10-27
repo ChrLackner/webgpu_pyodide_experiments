@@ -126,7 +126,15 @@ class WebGPUScene(
         self.run_method("run_user_function", data)
 
     def draw_mesh(self, data):
-        data["run_function"] = "draw_mesh"
+        data["run_function"] = "import webgpu.pyodide_code; webgpu.pyodide_code.draw_mesh"
         data["trigs"] = to_js(data["trigs"])
         data["edges"] = to_js(data["edges"])
+        self.run_method("draw", data)
+
+    def draw_cf(self, data):
+        data["run_function"] = "import webgpu.pyodide_code; webgpu.pyodide_code.draw_cf"
+        data["trig_function_values"] = to_js(data.pop("cf"))
+        data["trigs"] = to_js(data["trigs"])
+        data["edges"] = to_js(data["edges"])
+        print("draw cf with data = ", data)
         self.run_method("draw", data)
