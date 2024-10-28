@@ -51,11 +51,7 @@ class WireFrameRenderer:
                         "cullMode": "none",
                         "frontFace": "ccw",
                     },
-                    "depthStencil": {
-                        **depth_stencil,
-                        "depthBias": -1.0,  # Bring edges slightly forward
-                        "depthBiasSlopeScale": -1,  # Keep edges in front of the triangles
-                    }
+                    "depthStencil" : self.gpu.depth_stencil
                 }
             )
         )
